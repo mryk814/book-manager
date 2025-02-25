@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 
-from PyQt6.QtCore import QMutex, QSize, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QMutex, QPoint, QSize, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -777,6 +777,8 @@ class MainWindow(QMainWindow):
 
     def _show_batch_operations_menu(self):
         """一括操作メニューを表示"""
+        from gui.library_view import LibraryView
+
         # ライブラリビューの取得
         library_view = self.findChild(LibraryView)
         if not library_view:
@@ -845,6 +847,8 @@ class MainWindow(QMainWindow):
 
     def _batch_set_favorite(self, books, is_favorite):
         """複数の書籍のお気に入り状態を一括設定"""
+        from gui.library_view import LibraryView
+
         if not books:
             return
 
@@ -877,6 +881,8 @@ class MainWindow(QMainWindow):
 
     def _batch_set_reading_status(self, books, status):
         """複数の書籍の読書状態を一括設定"""
+        from gui.library_view import LibraryView
+
         if not books:
             return
 
@@ -909,6 +915,8 @@ class MainWindow(QMainWindow):
 
     def _batch_delete_books(self, books):
         """複数の書籍を一括削除"""
+        from gui.library_view import LibraryView
+
         if not books:
             return
 

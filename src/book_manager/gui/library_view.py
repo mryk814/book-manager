@@ -173,6 +173,10 @@ class GridBookView(QScrollArea):
         # 選択されたアイテムのインデックス
         self.selected_index = -1
 
+        # 選択モード（単一選択がデフォルト）
+        self.multi_select_mode = False
+        self.selected_indices = set()
+
         # 遅延ロード用の設定
         self.visible_rows = {}  # 表示中の行：{行番号: Widgetのリスト}
         self.loaded_ranges = []  # ロード済みの範囲：[(開始行, 終了行), ...]
@@ -990,7 +994,9 @@ class ListBookView(QTableView):
 
         # ダブルクリックシグナルの接続
         self.doubleClicked.connect(self._on_double_clicked)
-
+        # 選択モード（単一選択がデフォルト）
+        self.multi_select_mode = False
+        self.selected_indices = set()
         # 書籍リスト
         self.books = []
 
@@ -1332,6 +1338,10 @@ class BookshelfView(QScrollArea):
 
         # 選択されたアイテムのインデックス
         self.selected_index = -1
+
+        # 選択モード（単一選択がデフォルト）
+        self.multi_select_mode = False
+        self.selected_indices = set()
 
         # 遅延ロード用の設定
         self.visible_shelves = []  # 表示中の棚

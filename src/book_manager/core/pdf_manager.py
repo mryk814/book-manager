@@ -34,6 +34,11 @@ class PDFManager:
             dict: 抽出されたメタデータ
         """
         try:
+            print(f"PDFファイルを開こうとしています: {pdf_path}")  # デバッグ情報
+            if not os.path.exists(pdf_path):
+                logging.error(f"PDFファイルが存在しません: {pdf_path}")
+                return None
+
             doc = fitz.open(pdf_path)
             metadata = {}
 
@@ -42,8 +47,17 @@ class PDFManager:
             if pdf_metadata:
                 metadata["title"] = pdf_metadata.get("title", "")
                 metadata["author"] = pdf_metadata.get("author", "")
-                metadata["subject"] = pdf_metadata.get("subject", "")
-                metadata["keywords"] = pdf_metadata.get("keywords", "")
+                # 'subject'フィールドは利用しない（Bookモデルに存在しないため）
+                # metadata['subject'] = pdf_metadata.get('subject', '')
+                # 'keywords'フィールドは利用しない（Bookモデルに存在しないため）
+                # metadata['keywords'] = pdf_metadata.get('keywords', '')
+
+                # キーワードからタグを抽出（あれば）
+                keywords = pdf_metadata.get("keywords", "")
+                if keywords:
+                    metadata["tags"] = [
+                        kw.strip() for kw in keywords.split(",") if kw.strip()
+                    ]
 
                 # 日付の処理
                 if "creationDate" in pdf_metadata and pdf_metadata["creationDate"]:
@@ -79,10 +93,12 @@ class PDFManager:
                 metadata["thumbnail_path"] = thumbnail_path
 
             doc.close()
+            print(f"メタデータ抽出成功: {metadata.get('title')}")  # デバッグ情報
             return metadata
 
         except Exception as e:
             logging.error(f"メタデータ抽出エラー ({pdf_path}): {e}")
+            print(f"メタデータ抽出エラー: {e}")  # デバッグ情報
             # 最低限の情報を返す
             file_name = os.path.basename(pdf_path)
             base_name = os.path.splitext(file_name)[0]

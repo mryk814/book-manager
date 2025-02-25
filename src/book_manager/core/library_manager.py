@@ -153,29 +153,43 @@ class LibraryManager:
             Book: インポートされた書籍オブジェクト、失敗時はNone
         """
         try:
-            if not os.path.exists(file_path) or not file_path.lower().endswith(".pdf"):
-                logging.error(f"無効なPDFファイル: {file_path}")
+            print(f"ファイルのインポートを試みています: {file_path}")  # デバッグ情報
+            if not os.path.exists(file_path):
+                logging.error(f"ファイルが存在しません: {file_path}")
+                print(f"ファイルが存在しません: {file_path}")  # デバッグ情報
+                return None
+
+            if not file_path.lower().endswith(".pdf"):
+                logging.error(f"PDFファイルではありません: {file_path}")
+                print(f"PDFファイルではありません: {file_path}")  # デバッグ情報
                 return None
 
             # 既存の書籍をチェック
             existing_book = self.db.get_book_by_path(file_path)
             if existing_book:
                 logging.info(f"既存の書籍をスキップ: {file_path}")
+                print(f"既存の書籍をスキップ: {file_path}")  # デバッグ情報
                 return existing_book
 
             # メタデータを抽出してインポート
             metadata = self.pdf.extract_metadata(file_path)
             if not metadata:
                 logging.warning(f"メタデータの抽出に失敗: {file_path}")
+                print(f"メタデータの抽出に失敗: {file_path}")  # デバッグ情報
                 return None
 
             # 書籍を追加
             book = self.db.add_book(metadata)
             logging.info(f"PDFをインポートしました: {metadata.get('title')}")
+            print(f"PDFをインポートしました: {metadata.get('title')}")  # デバッグ情報
             return book
 
         except Exception as e:
             logging.error(f"PDFのインポートエラー ({file_path}): {e}")
+            print(f"PDFのインポートエラー: {e}")  # デバッグ情報
+            import traceback
+
+            traceback.print_exc()  # スタックトレースを出力
             return None
 
     def update_book_metadata(self, book_id, metadata):

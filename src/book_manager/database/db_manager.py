@@ -43,31 +43,76 @@ class DatabaseManager:
         Returns:
             Book: 追加された書籍オブジェクト
         """
-        # ファイルパスが既に存在するか確認
-        existing_book = (
-            self.session.query(Book).filter_by(file_path=book_data["file_path"]).first()
-        )
-        if existing_book:
-            logging.warning(f"既存の書籍です: {book_data['file_path']}")
-            return existing_book
+        try:
+            print(
+                f"書籍の追加を試みています: {book_data.get('title', 'Unknown')}"
+            )  # デバッグ情報
 
-        # 新しい書籍オブジェクトを作成
-        new_book = Book(**book_data)
+            # 必要なフィールドが存在するか確認
+            if "file_path" not in book_data or not book_data["file_path"]:
+                logging.error("ファイルパスが指定されていません")
+                print("ファイルパスが指定されていません")  # デバッグ情報
+                return None
 
-        # タグとシリーズの処理
-        if "tags" in book_data and book_data["tags"]:
-            for tag_name in book_data["tags"]:
+            if "title" not in book_data or not book_data["title"]:
+                file_name = os.path.basename(book_data["file_path"])
+                book_data["title"] = os.path.splitext(file_name)[0]
+                print(
+                    f"タイトルがないためファイル名を使用: {book_data['title']}"
+                )  # デバッグ情報
+
+            # ファイルパスが既に存在するか確認
+            existing_book = (
+                self.session.query(Book)
+                .filter_by(file_path=book_data["file_path"])
+                .first()
+            )
+            if existing_book:
+                logging.warning(f"既存の書籍です: {book_data['file_path']}")
+                print(f"既存の書籍です: {book_data['file_path']}")  # デバッグ情報
+                return existing_book
+
+            # モデルに存在するフィールドのみを抽出
+            valid_fields = {}
+            book_model_attrs = [attr.key for attr in Book.__table__.columns]
+
+            for key, value in book_data.items():
+                if key in book_model_attrs:
+                    valid_fields[key] = value
+                elif key != "tags" and key != "series_name":
+                    print(f"警告: '{key}'はBookモデルの有効なフィールドではありません")
+
+            # タグとシリーズを一時的に取り除く
+            tags_data = book_data.get("tags", [])
+            series_name = book_data.get("series_name")
+
+            # 新しい書籍オブジェクトを作成
+            new_book = Book(**valid_fields)
+
+            # タグの処理
+            for tag_name in tags_data:
                 tag = self.get_or_create_tag(tag_name)
                 new_book.tags.append(tag)
 
-        if "series_name" in book_data and book_data["series_name"]:
-            series = self.get_or_create_series(book_data["series_name"])
-            new_book.series.append(series)
+            # シリーズの処理
+            if series_name:
+                series = self.get_or_create_series(series_name)
+                new_book.series.append(series)
 
-        self.session.add(new_book)
-        self.session.commit()
-        logging.info(f"書籍を追加しました: {new_book.title}")
-        return new_book
+            self.session.add(new_book)
+            self.session.commit()
+            logging.info(f"書籍を追加しました: {new_book.title}")
+            print(f"書籍を追加しました: {new_book.title}")  # デバッグ情報
+            return new_book
+
+        except Exception as e:
+            self.session.rollback()
+            logging.error(f"書籍追加エラー: {e}")
+            print(f"書籍追加エラー: {e}")  # デバッグ情報
+            import traceback
+
+            traceback.print_exc()  # スタックトレースを出力
+            return None
 
     def update_book(self, book_id, book_data):
         """

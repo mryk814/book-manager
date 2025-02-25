@@ -445,16 +445,22 @@ class MainWindow(QMainWindow):
 
     def _update_scan_progress(self, progress, message, total, current):
         """スキャン進捗の更新"""
-        if self.scan_progress:
-            self.scan_progress.setValue(int(progress))
-            self.scan_progress.setLabelText(
-                f"スキャン中 ({current}/{total}): {message}"
-            )
+        if self.scan_progress and not self.scan_progress.wasCanceled():
+            try:
+                self.scan_progress.setValue(int(progress))
+                self.scan_progress.setLabelText(
+                    f"スキャン中 ({current}/{total}): {message}"
+                )
 
-            if self.scan_progress.wasCanceled():
-                # キャンセル処理（現在のスレッドは終了する必要がある）
-                self.scan_worker.terminate()
-                self.scan_worker = None
+                if self.scan_progress.wasCanceled():
+                    # キャンセル処理（現在のスレッドは終了する必要がある）
+                    if self.scan_worker and self.scan_worker.isRunning():
+                        self.scan_worker.terminate()
+                    self.scan_worker = None
+                    self.scan_progress = None
+            except Exception as e:
+                # 進捗ダイアログが既に閉じられている可能性がある
+                print(f"進捗更新エラー: {e}")
                 self.scan_progress = None
 
     def _scan_finished(self, result):
@@ -594,3 +600,23 @@ class MainWindow(QMainWindow):
         # その他のクリーンアップ
 
         event.accept()
+
+    def _configure_library_paths(self):
+        """ライブラリパスの設定"""
+        from gui.dialogs.library_paths_dialog import LibraryPathsDialog
+
+        dialog = LibraryPathsDialog(self.config, self)
+        result = dialog.exec()
+
+        if result == QDialog.DialogCode.Accepted:
+            # パスが変更された場合、ライブラリを再スキャンするか尋ねる
+            reply = QMessageBox.question(
+                self,
+                "ライブラリのスキャン",
+                "ライブラリパスが変更されました。今すぐライブラリをスキャンしますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self._scan_libraries()

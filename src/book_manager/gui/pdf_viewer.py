@@ -50,6 +50,7 @@ class PDFPageWidget(QLabel):
         # ページ画像
         self.page_pixmap = None
         self.zoom_factor = 1.0
+        self.fit_to_window = True  # デフォルトでウィンドウに合わせる
 
     def set_page_pixmap(self, pixmap, zoom=1.0):
         """ページ画像を設定"""
@@ -57,16 +58,63 @@ class PDFPageWidget(QLabel):
         self.zoom_factor = zoom
 
         if pixmap:
-            # ズーム適用
-            scaled_pixmap = pixmap.scaled(
-                int(pixmap.width() * zoom),
-                int(pixmap.height() * zoom),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self.setPixmap(scaled_pixmap)
+            if self.fit_to_window:
+                self.fit_pixmap_to_window()
+            else:
+                # ズーム適用
+                scaled_pixmap = pixmap.scaled(
+                    int(pixmap.width() * zoom),
+                    int(pixmap.height() * zoom),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.setPixmap(scaled_pixmap)
         else:
             self.clear()
+
+    def fit_pixmap_to_window(self):
+        """ピクセルマップをウィンドウに合わせる"""
+        if not self.page_pixmap:
+            return
+
+        # 親のサイズを取得
+        parent_size = self.size()
+
+        # 余白を考慮
+        available_width = parent_size.width() - 20
+        available_height = parent_size.height() - 20
+
+        # ピクセルマップをリサイズ
+        scaled_pixmap = self.page_pixmap.scaled(
+            available_width,
+            available_height,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+        self.setPixmap(scaled_pixmap)
+
+    def set_fit_to_window(self, fit):
+        """ウィンドウに合わせるかどうかを設定"""
+        self.fit_to_window = fit
+        if self.page_pixmap:
+            if fit:
+                self.fit_pixmap_to_window()
+            else:
+                # 通常のズーム表示に戻す
+                scaled_pixmap = self.page_pixmap.scaled(
+                    int(self.page_pixmap.width() * self.zoom_factor),
+                    int(self.page_pixmap.height() * self.zoom_factor),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.setPixmap(scaled_pixmap)
+
+    def resizeEvent(self, event):
+        """リサイズイベント"""
+        super().resizeEvent(event)
+        if self.fit_to_window and self.page_pixmap:
+            self.fit_pixmap_to_window()
 
     def clear_page(self):
         """ページを消去"""
@@ -109,6 +157,7 @@ class PDFViewWidget(QScrollArea):
         # ビューモード
         self.view_mode = "single"  # single, double, continuous
         self.manga_mode = False  # 右から左への表示
+        self.fit_to_window = True  # デフォルトでウィンドウに合わせる
 
     def load_document(self, pdf_path):
         """PDFドキュメントを読み込む"""
@@ -177,6 +226,8 @@ class PDFViewWidget(QScrollArea):
 
             # 表示
             self.page_view.set_page_pixmap(pixmap, 1.0)
+            # フィットモード設定を適用
+            self.page_view.set_fit_to_window(self.fit_to_window)
 
             # シグナル発行
             self.page_changed.emit(self.current_page)
@@ -217,17 +268,32 @@ class PDFViewWidget(QScrollArea):
     def set_zoom(self, zoom_factor):
         """ズーム倍率を設定"""
         self.zoom_factor = zoom_factor
+        if self.fit_to_window:
+            # フィットモードを解除
+            self.set_fit_to_window(False)
         self._render_current_page()
 
     def zoom_in(self):
         """拡大"""
+        if self.fit_to_window:
+            # フィットモードを解除
+            self.set_fit_to_window(False)
         self.zoom_factor = min(3.0, self.zoom_factor * 1.2)
         self._render_current_page()
 
     def zoom_out(self):
         """縮小"""
+        if self.fit_to_window:
+            # フィットモードを解除
+            self.set_fit_to_window(False)
         self.zoom_factor = max(0.1, self.zoom_factor / 1.2)
         self._render_current_page()
+
+    def set_fit_to_window(self, fit):
+        """ウィンドウに合わせる設定"""
+        self.fit_to_window = fit
+        if self.doc:
+            self.page_view.set_fit_to_window(fit)
 
     def set_rotation(self, rotation):
         """回転を設定"""
@@ -264,6 +330,13 @@ class PDFViewWidget(QScrollArea):
         self.current_page = 0
         self.total_pages = 0
         self.page_pixmaps.clear()
+
+    def resizeEvent(self, event):
+        """リサイズイベント"""
+        super().resizeEvent(event)
+        if self.fit_to_window and self.doc:
+            # ページを再レンダリングせずに、既存のピクセルマップを使用してフィット表示を更新
+            self.page_view.fit_pixmap_to_window()
 
     def mousePressEvent(self, event):
         """マウスプレスイベント"""
@@ -306,6 +379,9 @@ class PDFViewWidget(QScrollArea):
             self.rotate_clockwise()
         elif key == Qt.Key.Key_L:
             self.rotate_counterclockwise()
+        elif key == Qt.Key.Key_F:
+            # Fキーでフィットモード切替
+            self.set_fit_to_window(not self.fit_to_window)
         else:
             super().keyPressEvent(event)
 
@@ -377,13 +453,15 @@ class PDFViewerWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # ツールバー
-        self._create_toolbar()
-
-        # PDFビューウィジェット
+        # PDFビューウィジェット - この行を_create_toolbarの前に移動
         self.pdf_view = PDFViewWidget()
         self.pdf_view.page_changed.connect(self._on_page_changed)
         self.pdf_view.double_clicked.connect(self._toggle_fullscreen)
+
+        # ツールバー
+        self._create_toolbar()
+
+        # PDFビューを追加
         main_layout.addWidget(self.pdf_view)
 
         # ステータスバー
@@ -410,11 +488,11 @@ class PDFViewerWindow(QMainWindow):
 
         # ナビゲーションアクション
         self.prev_action = QAction("前へ", self)
-        self.prev_action.triggered.connect(self.pdf_view.prev_page)
+        self.prev_action.triggered.connect(lambda: self.pdf_view.prev_page())
         toolbar.addAction(self.prev_action)
 
         self.next_action = QAction("次へ", self)
-        self.next_action.triggered.connect(self.pdf_view.next_page)
+        self.next_action.triggered.connect(lambda: self.pdf_view.next_page())
         toolbar.addAction(self.next_action)
 
         # ページ選択
@@ -433,29 +511,49 @@ class PDFViewerWindow(QMainWindow):
         toolbar.addSeparator()
 
         self.zoom_out_action = QAction("縮小", self)
-        self.zoom_out_action.triggered.connect(self.pdf_view.zoom_out)
+        self.zoom_out_action.triggered.connect(lambda: self.pdf_view.zoom_out())
         toolbar.addAction(self.zoom_out_action)
 
         self.zoom_combo = QComboBox()
-        zoom_levels = ["50%", "75%", "100%", "125%", "150%", "200%", "300%"]
+        zoom_levels = [
+            "ウィンドウに合わせる",
+            "50%",
+            "75%",
+            "100%",
+            "125%",
+            "150%",
+            "200%",
+            "300%",
+        ]
         self.zoom_combo.addItems(zoom_levels)
-        self.zoom_combo.setCurrentText("100%")
-        self.zoom_combo.currentTextChanged.connect(self._on_zoom_changed)
+        self.zoom_combo.setCurrentIndex(0)  # デフォルトで「ウィンドウに合わせる」
+        self.zoom_combo.currentIndexChanged.connect(self._on_zoom_combo_changed)
         toolbar.addWidget(self.zoom_combo)
 
         self.zoom_in_action = QAction("拡大", self)
-        self.zoom_in_action.triggered.connect(self.pdf_view.zoom_in)
+        self.zoom_in_action.triggered.connect(lambda: self.pdf_view.zoom_in())
         toolbar.addAction(self.zoom_in_action)
+
+        # ウィンドウに合わせるアクション
+        self.fit_window_action = QAction("ウィンドウに合わせる", self)
+        self.fit_window_action.setCheckable(True)
+        self.fit_window_action.setChecked(True)  # デフォルトで有効
+        self.fit_window_action.triggered.connect(self._toggle_fit_window)
+        toolbar.addAction(self.fit_window_action)
 
         # 回転
         toolbar.addSeparator()
 
         self.rotate_ccw_action = QAction("左回転", self)
-        self.rotate_ccw_action.triggered.connect(self.pdf_view.rotate_counterclockwise)
+        self.rotate_ccw_action.triggered.connect(
+            lambda: self.pdf_view.rotate_counterclockwise()
+        )
         toolbar.addAction(self.rotate_ccw_action)
 
         self.rotate_cw_action = QAction("右回転", self)
-        self.rotate_cw_action.triggered.connect(self.pdf_view.rotate_clockwise)
+        self.rotate_cw_action.triggered.connect(
+            lambda: self.pdf_view.rotate_clockwise()
+        )
         toolbar.addAction(self.rotate_cw_action)
 
         # 表示モード
@@ -566,6 +664,41 @@ class PDFViewerWindow(QMainWindow):
         # パーセント表示から浮動小数点に変換
         zoom_value = float(zoom_text.rstrip("%")) / 100.0
         self.pdf_view.set_zoom(zoom_value)
+
+    def _on_zoom_combo_changed(self, index):
+        """ズームコンボボックス変更時の処理"""
+        text = self.zoom_combo.currentText()
+
+        if text == "ウィンドウに合わせる":
+            # ウィンドウに合わせるモードを有効化
+            self.pdf_view.set_fit_to_window(True)
+            self.fit_window_action.setChecked(True)
+        else:
+            # パーセント表示から浮動小数点に変換
+            zoom_value = float(text.rstrip("%")) / 100.0
+            self.pdf_view.set_fit_to_window(False)
+            self.fit_window_action.setChecked(False)
+            self.pdf_view.set_zoom(zoom_value)
+
+    def _toggle_fit_window(self, checked):
+        """ウィンドウに合わせるモードの切り替え"""
+        self.pdf_view.set_fit_to_window(checked)
+
+        # コンボボックスも連動して更新
+        if checked:
+            self.zoom_combo.setCurrentIndex(0)  # 「ウィンドウに合わせる」を選択
+        else:
+            # 現在のズーム率に近い項目を選択
+            current_zoom = self.pdf_view.zoom_factor
+            zoom_text = f"{int(current_zoom * 100)}%"
+            index = self.zoom_combo.findText(zoom_text)
+            if index >= 0:
+                self.zoom_combo.setCurrentIndex(index)
+            else:
+                # 該当するズーム率がない場合は100%を選択
+                index = self.zoom_combo.findText("100%")
+                if index >= 0:
+                    self.zoom_combo.setCurrentIndex(index)
 
     def _on_view_mode_changed(self, index):
         """表示モード変更時の処理"""

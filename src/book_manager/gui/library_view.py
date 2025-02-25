@@ -1,12 +1,29 @@
 import logging
 import os
 
-from PyQt6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QPixmap, QStandardItem, QStandardItemModel
+from PyQt6.QtCore import (
+    QAbstractListModel,
+    QModelIndex,
+    QPoint,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
+from PyQt6.QtGui import (
+    QAction,
+    QColor,
+    QIcon,
+    QPixmap,
+    QStandardItem,
+    QStandardItemModel,
+)
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QInputDialog,
@@ -156,20 +173,37 @@ class GridBookView(QScrollArea):
         # 選択されたアイテムのインデックス
         self.selected_index = -1
 
+        # 遅延ロード用の設定
+        self.visible_rows = {}  # 表示中の行：{行番号: Widgetのリスト}
+        self.loaded_ranges = []  # ロード済みの範囲：[(開始行, 終了行), ...]
+        self.row_heights = {}  # 各行の高さ：{行番号: 高さ}
+
+        # スクロールイベントの接続
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
     def set_books(self, books):
         """書籍リストを設定"""
         self.books = books
+        self.loaded_ranges = []
+        self.visible_rows = {}
+        self.row_heights = {}
         self._update_view()
 
     def set_item_size(self, width, height):
         """アイテムサイズを設定"""
         self.item_width = width
         self.item_height = height
+        self.loaded_ranges = []
+        self.visible_rows = {}
+        self.row_heights = {}
         self._update_view()
 
     def set_columns(self, columns):
         """カラム数を設定"""
         self.items_per_row = max(1, columns)
+        self.loaded_ranges = []
+        self.visible_rows = {}
+        self.row_heights = {}
         self._update_view()
 
     def _update_view(self):
@@ -184,36 +218,148 @@ class GridBookView(QScrollArea):
         if not self.books:
             return
 
-        # グリッドにアイテムを追加
-        for i, book in enumerate(self.books):
-            row = i // self.items_per_row
-            col = i % self.items_per_row
+        # 全体の行数を計算
+        total_rows = (len(self.books) + self.items_per_row - 1) // self.items_per_row
 
-            # 書籍アイテムウィジェットを作成
-            item = self._create_book_item(book, i)
-            self.grid_layout.addWidget(item, row, col)
+        # プレースホルダーとなる行を作成
+        for row in range(total_rows):
+            for col in range(self.items_per_row):
+                index = row * self.items_per_row + col
+                if index < len(self.books):
+                    # プレースホルダーウィジェット
+                    placeholder = QWidget()
+                    placeholder.setFixedSize(self.item_width, self.item_height)
+                    placeholder.setObjectName(f"placeholder_{row}_{col}")
 
-    def _create_book_item(self, book, index):
-        """書籍アイテムウィジェットを作成"""
-        item = QWidget()
-        item.setFixedSize(self.item_width, self.item_height)
-        item.setObjectName(f"book_item_{index}")
+                    # データ属性
+                    placeholder.setProperty("row", row)
+                    placeholder.setProperty("col", col)
+                    placeholder.setProperty("index", index)
+                    placeholder.setProperty("is_loaded", False)
 
-        # スタイルシート
-        item.setStyleSheet(
-            "QWidget#book_item_" + str(index) + " { "
+                    # 最小限のスタイル
+                    placeholder.setStyleSheet(
+                        f"QWidget#placeholder_{row}_{col} {{ "
+                        "    background-color: #f0f0f0; "
+                        "    border-radius: 5px; "
+                        "    border: 1px solid #cccccc; "
+                        "}"
+                    )
+
+                    # 行に追加
+                    self.grid_layout.addWidget(placeholder, row, col)
+
+                    # 行の追跡
+                    if row not in self.visible_rows:
+                        self.visible_rows[row] = []
+                    self.visible_rows[row].append(placeholder)
+
+                    # 行の高さを記録
+                    self.row_heights[row] = self.item_height
+
+        # 初期表示範囲をロード
+        QTimer.singleShot(100, self._load_visible_rows)
+
+    def _load_visible_rows(self):
+        """現在表示されている行にアイテムをロード"""
+        if not self.visible_rows:
+            return
+
+        # スクロール位置を取得
+        scroll_pos = self.verticalScrollBar().value()
+        viewport_height = self.viewport().height()
+
+        # 表示されている行を特定
+        visible_row_indices = []
+        for row_idx, widgets in self.visible_rows.items():
+            if widgets:
+                # 行の位置を確認（最初のウィジェットの位置を使用）
+                row_pos = widgets[0].mapTo(self.content_widget, QPoint(0, 0)).y()
+                row_height = self.row_heights.get(row_idx, self.item_height)
+
+                # 行が表示範囲内にあるか確認
+                if -row_height <= row_pos - scroll_pos <= viewport_height:
+                    visible_row_indices.append(row_idx)
+
+        if not visible_row_indices:
+            return
+
+        # 表示範囲の前後も含めてロード対象とする
+        buffer = 2  # 前後2行ずつバッファ
+        visible_min = min(visible_row_indices)
+        visible_max = max(visible_row_indices)
+
+        load_min = max(0, visible_min - buffer)
+        load_max = min(max(self.visible_rows.keys()), visible_max + buffer)
+
+        # すでにロード済みの範囲を確認
+        should_load = True
+        for start, end in self.loaded_ranges:
+            if start <= load_min and end >= load_max:
+                should_load = False
+                break
+
+        if should_load:
+            # 表示範囲内の行にアイテムをロード
+            for row_idx in range(load_min, load_max + 1):
+                if row_idx in self.visible_rows:
+                    for widget in self.visible_rows[row_idx]:
+                        if not widget.property("is_loaded"):
+                            index = widget.property("index")
+                            if 0 <= index < len(self.books):
+                                self._load_book_item(widget, self.books[index], index)
+                                widget.setProperty("is_loaded", True)
+
+            # ロード済み範囲を更新
+            self.loaded_ranges.append((load_min, load_max))
+
+            # 範囲が多すぎる場合は古い範囲を削除
+            if len(self.loaded_ranges) > 3:
+                old_min, old_max = self.loaded_ranges.pop(0)
+                # 現在の範囲とオーバーラップしない場合のみアンロード
+                overlap = False
+                for start, end in self.loaded_ranges:
+                    if not (old_max < start or old_min > end):
+                        overlap = True
+                        break
+
+                if not overlap:
+                    for row_idx in range(old_min, old_max + 1):
+                        if row_idx < load_min or row_idx > load_max:
+                            if row_idx in self.visible_rows:
+                                # 表示範囲外なのでアンロード
+                                for widget in self.visible_rows[row_idx]:
+                                    self._unload_book_item(widget)
+
+    def _load_book_item(self, placeholder, book, index):
+        """プレースホルダーに書籍アイテムの内容をロード"""
+        row = placeholder.property("row")
+        col = placeholder.property("col")
+
+        # 既存のレイアウトとウィジェットを取得（なければ新規作成）
+        layout = placeholder.layout()
+        if not layout:
+            layout = QVBoxLayout(placeholder)
+            layout.setContentsMargins(5, 5, 5, 5)
+
+        # 既存の子ウィジェットをクリア
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # スタイルシート更新
+        placeholder.setStyleSheet(
+            f"QWidget#placeholder_{row}_{col} {{ "
             "    background-color: #f0f0f0; "
             "    border-radius: 5px; "
             "    border: 1px solid #cccccc; "
             "}"
-            "QWidget#book_item_" + str(index) + ":hover { "
+            f"QWidget#placeholder_{row}_{col}:hover {{ "
             "    background-color: #e0e0e0; "
             "    border: 1px solid #aaaaaa; "
             "}"
         )
-
-        layout = QVBoxLayout(item)
-        layout.setContentsMargins(5, 5, 5, 5)
 
         # サムネイル画像
         thumbnail = QLabel()
@@ -260,70 +406,116 @@ class GridBookView(QScrollArea):
             layout.addWidget(author)
 
         # クリックイベント
-        item.mousePressEvent = lambda event, idx=index: self._on_item_clicked(idx)
+        placeholder.mousePressEvent = lambda event, idx=index: self._on_item_clicked(
+            idx
+        )
 
-        return item
+    def _unload_book_item(self, placeholder):
+        """プレースホルダーをリセット"""
+        if not placeholder.property("is_loaded"):
+            return
+
+        row = placeholder.property("row")
+        col = placeholder.property("col")
+
+        # 既存のレイアウトとウィジェットを取得
+        layout = placeholder.layout()
+        if layout:
+            # 既存の子ウィジェットをクリア
+            while layout.count():
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+        # スタイルシートをリセット
+        placeholder.setStyleSheet(
+            f"QWidget#placeholder_{row}_{col} {{ "
+            "    background-color: #f0f0f0; "
+            "    border-radius: 5px; "
+            "    border: 1px solid #cccccc; "
+            "}"
+        )
+
+        placeholder.setProperty("is_loaded", False)
+
+    def _on_scroll(self, value):
+        """スクロール時の処理"""
+        # スクロール位置が変わったら表示行を更新
+        QTimer.singleShot(100, self._load_visible_rows)
 
     def _on_item_clicked(self, index):
         """アイテムクリック時の処理"""
         # 既存の選択状態をリセット
         if 0 <= self.selected_index < len(self.books):
-            old_item = self.content_widget.findChild(
-                QWidget, f"book_item_{self.selected_index}"
-            )
-            if old_item:
-                old_item.setStyleSheet(
-                    "QWidget#book_item_" + str(self.selected_index) + " { "
-                    "    background-color: #f0f0f0; "
-                    "    border-radius: 5px; "
-                    "    border: 1px solid #cccccc; "
-                    "}"
-                    "QWidget#book_item_" + str(self.selected_index) + ":hover { "
-                    "    background-color: #e0e0e0; "
-                    "    border: 1px solid #aaaaaa; "
-                    "}"
-                )
+            for row_idx, widgets in self.visible_rows.items():
+                for widget in widgets:
+                    if widget.property(
+                        "index"
+                    ) == self.selected_index and widget.property("is_loaded"):
+                        row = widget.property("row")
+                        col = widget.property("col")
+                        widget.setStyleSheet(
+                            f"QWidget#placeholder_{row}_{col} {{ "
+                            "    background-color: #f0f0f0; "
+                            "    border-radius: 5px; "
+                            "    border: 1px solid #cccccc; "
+                            "}"
+                            f"QWidget#placeholder_{row}_{col}:hover {{ "
+                            "    background-color: #e0e0e0; "
+                            "    border: 1px solid #aaaaaa; "
+                            "}"
+                        )
 
         # 新しい選択状態
         self.selected_index = index
-        item = self.content_widget.findChild(QWidget, f"book_item_{index}")
-        if item:
-            item.setStyleSheet(
-                "QWidget#book_item_" + str(index) + " { "
-                "    background-color: #d0d0ff; "
-                "    border-radius: 5px; "
-                "    border: 2px solid #6666cc; "
-                "}"
-            )
+        for row_idx, widgets in self.visible_rows.items():
+            for widget in widgets:
+                if widget.property("index") == index and widget.property("is_loaded"):
+                    row = widget.property("row")
+                    col = widget.property("col")
+                    widget.setStyleSheet(
+                        f"QWidget#placeholder_{row}_{col} {{ "
+                        "    background-color: #d0d0ff; "
+                        "    border-radius: 5px; "
+                        "    border: 2px solid #6666cc; "
+                        "}"
+                    )
 
         # 選択シグナルを発行
-        self.book_selected.emit(self.books[index])
+        if 0 <= index < len(self.books):
+            self.book_selected.emit(self.books[index])
 
     def contextMenuEvent(self, event):
         """コンテキストメニューイベント"""
         # クリックされた位置のアイテムを特定
         for i in range(len(self.books)):
-            item = self.content_widget.findChild(QWidget, f"book_item_{i}")
-            if item and item.geometry().contains(
+            spine = self.findChild(QFrame, f"book_spine_{i}")
+            if spine and spine.geometry().contains(
                 event.pos() - self.content_widget.pos()
             ):
-                self._on_item_clicked(i)
+                self._on_spine_clicked(i)
 
                 # コンテキストメニューを作成
                 menu = QMenu(self)
 
                 open_action = QAction("開く", self)
-                open_action.triggered.connect(lambda: self._open_book(i))
+                open_action.triggered.connect(
+                    lambda checked=False, idx=i: self._open_book(idx)
+                )
                 menu.addAction(open_action)
 
                 edit_action = QAction("編集", self)
-                edit_action.triggered.connect(lambda: self._edit_book(i))
+                edit_action.triggered.connect(
+                    lambda checked=False, idx=i: self._edit_book(idx)
+                )
                 menu.addAction(edit_action)
 
                 menu.addSeparator()
 
                 delete_action = QAction("削除", self)
-                delete_action.triggered.connect(lambda: self._delete_book(i))
+                delete_action.triggered.connect(
+                    lambda checked=False, idx=i: self._delete_book(idx)
+                )
                 menu.addAction(delete_action)
 
                 menu.exec(event.globalPos())
@@ -528,14 +720,24 @@ class BookshelfView(QScrollArea):
         # 選択されたアイテムのインデックス
         self.selected_index = -1
 
+        # 遅延ロード用の設定
+        self.visible_shelves = []  # 表示中の棚
+        self.loaded_ranges = []  # ロード済みの範囲
+        self.max_visible_shelves = 8  # 一度に表示する最大棚数
+
+        # スクロールイベントの接続
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
     def set_books(self, books):
         """書籍リストを設定"""
         self.books = books
+        self.loaded_ranges = []
         self._update_view()
 
     def set_items_per_shelf(self, count):
         """一棚あたりのアイテム数を設定"""
         self.items_per_shelf = max(1, count)
+        self.loaded_ranges = []
         self._update_view()
 
     def _update_view(self):
@@ -546,6 +748,8 @@ class BookshelfView(QScrollArea):
             if item.widget():
                 item.widget().deleteLater()
 
+        self.visible_shelves = []
+
         # 書籍がない場合は終了
         if not self.books:
             return
@@ -555,51 +759,171 @@ class BookshelfView(QScrollArea):
             len(self.books) + self.items_per_shelf - 1
         ) // self.items_per_shelf
 
-        # 棚ごとに書籍を配置
+        # シェルフのプレースホルダーを作成
         for shelf_index in range(shelf_count):
-            # 棚のウィジェット
-            shelf = QWidget()
+            # 棚のウィジェット（QFrameを使用）
+            shelf = QFrame()
             shelf.setObjectName(f"shelf_{shelf_index}")
-            shelf.setStyleSheet(
-                f"QWidget#shelf_{shelf_index} {{ "
-                "    background-color: #8B4513; "  # 棚の茶色
-                "    border-radius: 3px; "
-                "    min-height: 30px; "
-                "}}"
-            )
+
+            # 棚の色と境界線を設定
+            shelf.setAutoFillBackground(True)
+            palette = shelf.palette()
+            palette.setColor(shelf.backgroundRole(), QColor("#8B4513"))  # 茶色
+            shelf.setPalette(palette)
+
+            shelf.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
+            shelf.setLineWidth(2)
+            shelf.setMinimumHeight(30)
+
             shelf_layout = QHBoxLayout(shelf)
             shelf_layout.setContentsMargins(5, 5, 5, 5)
             shelf_layout.setSpacing(0)  # 本の間隔を狭く
 
-            # 棚に本を配置
-            start_idx = shelf_index * self.items_per_shelf
-            end_idx = min(start_idx + self.items_per_shelf, len(self.books))
+            # 空のラベルを追加（サイズ確保のため）
+            placeholder = QLabel(f"棚 {shelf_index + 1}")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setMinimumHeight(150)
+            shelf_layout.addWidget(placeholder)
 
-            for i in range(start_idx, end_idx):
-                book = self.books[i]
-                book_widget = self._create_book_spine(book, i)
-                shelf_layout.addWidget(book_widget)
+            # データ属性を設定
+            shelf.setProperty("shelf_index", shelf_index)
+            shelf.setProperty("is_loaded", False)
 
             # 棚を追加
             self.shelves_layout.addWidget(shelf)
+            self.visible_shelves.append(shelf)
+
+        # 初期表示範囲をロード
+        QTimer.singleShot(100, self._load_visible_shelves)
+
+    def _load_visible_shelves(self):
+        """現在表示されている棚にアイテムをロード"""
+        if not self.visible_shelves:
+            return
+
+        # スクロール位置を取得
+        scroll_pos = self.verticalScrollBar().value()
+        viewport_height = self.viewport().height()
+
+        # 表示範囲内の棚を特定
+        visible_indices = []
+        for shelf in self.visible_shelves:
+            shelf_idx = shelf.property("shelf_index")
+            shelf_pos = shelf.mapTo(self.content_widget, QPoint(0, 0)).y()
+
+            # 棚が表示範囲内にあるか確認
+            if -150 <= shelf_pos - scroll_pos <= viewport_height:
+                visible_indices.append(shelf_idx)
+
+        # 表示範囲の前後も含めてロード対象とする
+        buffer = 2  # 前後2棚ずつバッファ
+        visible_min = min(visible_indices) if visible_indices else 0
+        visible_max = max(visible_indices) if visible_indices else 0
+
+        load_min = max(0, visible_min - buffer)
+        load_max = min(len(self.visible_shelves) - 1, visible_max + buffer)
+
+        # すでにロード済みの範囲を確認
+        should_load = True
+        for start, end in self.loaded_ranges:
+            if start <= load_min and end >= load_max:
+                should_load = False
+                break
+
+        if should_load:
+            # 表示範囲内の棚にアイテムをロード
+            for shelf_idx in range(load_min, load_max + 1):
+                shelf = self.visible_shelves[shelf_idx]
+                if not shelf.property("is_loaded"):
+                    self._load_shelf_items(shelf)
+                    shelf.setProperty("is_loaded", True)
+
+            # ロード済み範囲を更新
+            self.loaded_ranges.append((load_min, load_max))
+
+            # 範囲が多すぎる場合は古い範囲を削除
+            if len(self.loaded_ranges) > 3:
+                old_min, old_max = self.loaded_ranges.pop(0)
+                # 現在の範囲とオーバーラップしない場合のみアンロード
+                overlap = False
+                for start, end in self.loaded_ranges:
+                    if not (old_max < start or old_min > end):
+                        overlap = True
+                        break
+
+                if not overlap:
+                    for shelf_idx in range(old_min, old_max + 1):
+                        if shelf_idx < load_min or shelf_idx > load_max:
+                            # 表示範囲外なのでアンロード
+                            self._unload_shelf_items(self.visible_shelves[shelf_idx])
+
+    def _load_shelf_items(self, shelf):
+        """棚にアイテムをロード"""
+        # 既存のアイテムをクリア
+        while shelf.layout().count():
+            item = shelf.layout().takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        shelf_idx = shelf.property("shelf_index")
+
+        # 棚に本を配置
+        start_idx = shelf_idx * self.items_per_shelf
+        end_idx = min(start_idx + self.items_per_shelf, len(self.books))
+
+        for i in range(start_idx, end_idx):
+            book = self.books[i]
+            book_widget = self._create_book_spine(book, i)
+            shelf.layout().addWidget(book_widget)
+
+    def _unload_shelf_items(self, shelf):
+        """棚のアイテムをアンロード"""
+        if not shelf.property("is_loaded"):
+            return
+
+        # 既存のアイテムをクリア
+        while shelf.layout().count():
+            item = shelf.layout().takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # プレースホルダーを追加
+        shelf_idx = shelf.property("shelf_index")
+        placeholder = QLabel(f"棚 {shelf_idx + 1}")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setMinimumHeight(150)
+        shelf.layout().addWidget(placeholder)
+
+        shelf.setProperty("is_loaded", False)
+
+    def _on_scroll(self, value):
+        """スクロール時の処理"""
+        # スクロール位置が変わったら表示棚を更新
+        QTimer.singleShot(100, self._load_visible_shelves)
 
     def _create_book_spine(self, book, index):
         """本の背表紙ウィジェットを作成"""
-        # 本の背表紙
-        spine = QWidget()
+        # 本の背表紙（QFrameを使用）
+        spine = QFrame()
         spine.setObjectName(f"book_spine_{index}")
         spine.setFixedWidth(30)  # 背表紙の幅
         spine.setMinimumHeight(150)  # 背表紙の高さ
 
-        # タイトルから背景色を生成
-        hue = sum(ord(c) for c in book.title) % 360
-        spine.setStyleSheet(
-            f"QWidget#book_spine_{index} {{ "
-            f"    background-color: hsv({hue}, 200, 220); "
-            "    border: 1px solid #555555; "
-            "    border-radius: 2px; "
-            "}}"
-        )
+        # タイトルに基づいて色を決定（より単純な実装）
+        title_hash = sum(ord(c) for c in book.title)
+        r = (title_hash % 150) + 100  # 100-250の範囲
+        g = ((title_hash * 3) % 150) + 100
+        b = ((title_hash * 7) % 150) + 100
+
+        # QPaletteを使用して背景色を設定
+        palette = spine.palette()
+        palette.setColor(spine.backgroundRole(), QColor(r, g, b))
+        spine.setAutoFillBackground(True)
+        spine.setPalette(palette)
+
+        # 境界線はフレームで設定（QFrameのメソッド）
+        spine.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+        spine.setLineWidth(1)
 
         # レイアウト
         layout = QVBoxLayout(spine)
@@ -621,6 +945,11 @@ class BookshelfView(QScrollArea):
         label.setToolTip(book.title)
         layout.addWidget(label)
 
+        # データ属性として保存（選択状態の維持用）
+        spine.setProperty("book_index", index)
+        spine.setProperty("book_color", QColor(r, g, b))
+        spine.setProperty("selected", False)
+
         # クリックイベント
         spine.mousePressEvent = lambda event, idx=index: self._on_spine_clicked(idx)
 
@@ -630,96 +959,37 @@ class BookshelfView(QScrollArea):
         """背表紙クリック時の処理"""
         # 既存の選択状態をリセット
         if 0 <= self.selected_index < len(self.books):
-            spine = self.findChild(QWidget, f"book_spine_{self.selected_index}")
+            spine = self.findChild(QFrame, f"book_spine_{self.selected_index}")
             if spine:
-                # もとのスタイルに戻す
-                book = self.books[self.selected_index]
-                hue = sum(ord(c) for c in book.title) % 360
-                spine.setStyleSheet(
-                    f"QWidget#book_spine_{self.selected_index} {{ "
-                    f"    background-color: hsv({hue}, 200, 220); "
-                    "    border: 1px solid #555555; "
-                    "    border-radius: 2px; "
-                    "}}"
-                )
+                # もとの色に戻す
+                original_color = spine.property("book_color")
+                palette = spine.palette()
+                palette.setColor(spine.backgroundRole(), original_color)
+                spine.setPalette(palette)
+
+                # 線の色を戻す
+                spine.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+                spine.setLineWidth(1)
+
+                spine.setProperty("selected", False)
 
         # 新しい選択状態
         self.selected_index = index
-        spine = self.findChild(QWidget, f"book_spine_{index}")
+        spine = self.findChild(QFrame, f"book_spine_{index}")
         if spine:
-            spine.setStyleSheet(
-                f"QWidget#book_spine_{index} {{ "
-                "    background-color: #ffff00; "  # 黄色でハイライト
-                "    border: 2px solid #ff0000; "
-                "    border-radius: 2px; "
-                "}}"
-            )
+            # 選択色に変更
+            palette = spine.palette()
+            palette.setColor(spine.backgroundRole(), QColor(255, 255, 0))  # 黄色
+            spine.setPalette(palette)
+
+            # 枠線を強調
+            spine.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
+            spine.setLineWidth(2)
+
+            spine.setProperty("selected", True)
 
         # 選択シグナルを発行
         self.book_selected.emit(self.books[index])
-
-    def contextMenuEvent(self, event):
-        """コンテキストメニューイベント"""
-        # クリックされた位置のアイテムを特定
-        for i in range(len(self.books)):
-            spine = self.findChild(QWidget, f"book_spine_{i}")
-            pos = spine.mapFrom(self, event.pos())
-            if spine and spine.rect().contains(pos):
-                self._on_spine_clicked(i)
-
-                # コンテキストメニューを作成
-                menu = QMenu(self)
-
-                open_action = QAction("開く", self)
-                open_action.triggered.connect(lambda: self._open_book(i))
-                menu.addAction(open_action)
-
-                edit_action = QAction("編集", self)
-                edit_action.triggered.connect(lambda: self._edit_book(i))
-                menu.addAction(edit_action)
-
-                menu.addSeparator()
-
-                delete_action = QAction("削除", self)
-                delete_action.triggered.connect(lambda: self._delete_book(i))
-                menu.addAction(delete_action)
-
-                menu.exec(event.globalPos())
-                break
-
-    def _open_book(self, index):
-        """書籍を開く"""
-        if 0 <= index < len(self.books):
-            book = self.books[index]
-            # 書籍を開くシグナルを発行（実装は親ウィジェットで行う）
-            self.book_selected.emit(book)
-
-    def _edit_book(self, index):
-        """書籍を編集"""
-        if 0 <= index < len(self.books):
-            book = self.books[index]
-            # 編集ダイアログを表示（実際の実装は親ウィジェットで行う）
-            # ここではシグナルのみ発行
-            self.book_selected.emit(book)
-
-    def _delete_book(self, index):
-        """書籍を削除"""
-        if 0 <= index < len(self.books):
-            book = self.books[index]
-
-            # 確認ダイアログ
-            reply = QMessageBox.question(
-                self,
-                "書籍の削除",
-                f"「{book.title}」を削除しますか？\nこの操作は元に戻せません。",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                # 削除処理（実際の実装は親ウィジェットで行う）
-                # ここではシグナルのみ発行
-                self.book_selected.emit(book)
 
 
 class LibraryView(QWidget):

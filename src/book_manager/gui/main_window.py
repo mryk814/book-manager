@@ -280,6 +280,13 @@ class MainWindow(QMainWindow):
         clear_button.clicked.connect(self._clear_search)
         tool_bar.addWidget(clear_button)
 
+        tool_bar.addSeparator()
+
+        # 書籍一括操作ボタン
+        batch_operations_button = QPushButton("選択書籍の一括操作")
+        batch_operations_button.clicked.connect(self._show_batch_operations_menu)
+        tool_bar.addWidget(batch_operations_button)
+
     def _create_main_content(self, main_layout):
         """メインコンテンツの作成"""
         # スプリッタの作成
@@ -767,3 +774,186 @@ class MainWindow(QMainWindow):
         else:
             # ライトテーマ（デフォルト）
             self.setStyleSheet("")
+
+    def _show_batch_operations_menu(self):
+        """一括操作メニューを表示"""
+        # ライブラリビューの取得
+        library_view = self.findChild(LibraryView)
+        if not library_view:
+            return
+
+        # 選択書籍を取得
+        selected_books = library_view.get_selected_books()
+        if not selected_books:
+            QMessageBox.warning(self, "選択エラー", "操作する書籍を選択してください。")
+            return
+
+        # メニューの作成
+        menu = QMenu(self)
+
+        # 一括更新
+        update_action = menu.addAction(f"選択した{len(selected_books)}冊を一括更新...")
+        update_action.triggered.connect(
+            lambda: library_view.batch_update_selected_books()
+        )
+
+        menu.addSeparator()
+
+        # お気に入り追加/削除
+        add_favorite_action = menu.addAction("お気に入りに追加")
+        add_favorite_action.triggered.connect(
+            lambda: self._batch_set_favorite(selected_books, True)
+        )
+
+        remove_favorite_action = menu.addAction("お気に入りから削除")
+        remove_favorite_action.triggered.connect(
+            lambda: self._batch_set_favorite(selected_books, False)
+        )
+
+        menu.addSeparator()
+
+        # 読書状態変更
+        reading_menu = menu.addMenu("読書状態を変更")
+
+        unread_action = reading_menu.addAction("未読に設定")
+        unread_action.triggered.connect(
+            lambda: self._batch_set_reading_status(selected_books, "未読")
+        )
+
+        reading_action = reading_menu.addAction("読書中に設定")
+        reading_action.triggered.connect(
+            lambda: self._batch_set_reading_status(selected_books, "読書中")
+        )
+
+        completed_action = reading_menu.addAction("読了に設定")
+        completed_action.triggered.connect(
+            lambda: self._batch_set_reading_status(selected_books, "読了")
+        )
+
+        menu.addSeparator()
+
+        # 削除
+        delete_action = menu.addAction(f"選択した{len(selected_books)}冊を削除...")
+        delete_action.triggered.connect(
+            lambda: self._batch_delete_books(selected_books)
+        )
+
+        # メニューを表示
+        sender = self.sender()
+        if sender:
+            menu.exec(sender.mapToGlobal(QPoint(0, sender.height())))
+
+    def _batch_set_favorite(self, books, is_favorite):
+        """複数の書籍のお気に入り状態を一括設定"""
+        if not books:
+            return
+
+        action_text = "お気に入りに追加" if is_favorite else "お気に入りから削除"
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            self,
+            f"{len(books)}冊を{action_text}",
+            f"選択した{len(books)}冊の書籍を{action_text}しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # お気に入り状態を更新
+            for book in books:
+                self.library_manager.update_book_metadata(
+                    book.id, {"is_favorite": is_favorite}
+                )
+
+            # ビューを更新
+            library_view = self.findChild(LibraryView)
+            if library_view:
+                library_view.refresh()
+
+            QMessageBox.information(
+                self, "更新完了", f"{len(books)}冊の書籍を{action_text}しました。"
+            )
+
+    def _batch_set_reading_status(self, books, status):
+        """複数の書籍の読書状態を一括設定"""
+        if not books:
+            return
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            self,
+            f"{len(books)}冊の読書状態を変更",
+            f"選択した{len(books)}冊の書籍の読書状態を「{status}」に設定しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 読書状態を更新
+            for book in books:
+                self.library_manager.update_book_metadata(
+                    book.id, {"reading_status": status}
+                )
+
+            # ビューを更新
+            library_view = self.findChild(LibraryView)
+            if library_view:
+                library_view.refresh()
+
+            QMessageBox.information(
+                self,
+                "更新完了",
+                f"{len(books)}冊の書籍の読書状態を「{status}」に設定しました。",
+            )
+
+    def _batch_delete_books(self, books):
+        """複数の書籍を一括削除"""
+        if not books:
+            return
+
+        # 削除前の確認
+        msg = (
+            f"選択した{len(books)}冊の書籍を削除しますか？\nこの操作は元に戻せません。"
+        )
+
+        # 書籍名を最大5冊まで表示
+        book_titles = [book.title for book in books[:5]]
+        if len(books) > 5:
+            book_titles.append(f"...他{len(books) - 5}冊")
+        msg += f"\n\n- " + "\n- ".join(book_titles)
+
+        reply = QMessageBox.question(
+            self,
+            "書籍の一括削除",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # ファイルも削除するか尋ねる
+            delete_file_reply = QMessageBox.question(
+                self,
+                "ファイルの削除",
+                "PDFファイルも削除しますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            delete_file = delete_file_reply == QMessageBox.StandardButton.Yes
+
+            # 書籍を削除
+            deleted_count = 0
+            for book in books:
+                if self.library_manager.delete_book(book.id, delete_file):
+                    deleted_count += 1
+
+            # ビューを更新
+            library_view = self.findChild(LibraryView)
+            if library_view:
+                library_view.refresh()
+
+            QMessageBox.information(
+                self, "削除完了", f"{deleted_count}冊の書籍を削除しました。"
+            )

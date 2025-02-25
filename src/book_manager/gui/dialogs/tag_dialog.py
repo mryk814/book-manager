@@ -3,13 +3,15 @@ import logging
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
-    QColorDialog,  # QColorDialogは正しくQtWidgetsから import
+    QCheckBox,
+    QColorDialog,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTableView,
@@ -31,10 +33,17 @@ class TagDialog(QDialog):
     def _init_ui(self):
         """UIの初期化"""
         self.setWindowTitle("タグの管理")
-        self.resize(500, 400)
+        self.resize(600, 500)
 
         # メインレイアウト
         layout = QVBoxLayout(self)
+
+        # ヘルプテキスト
+        help_label = QLabel(
+            "Ctrlキーを押しながらクリックで複数選択、Shiftキーで範囲選択ができます"
+        )
+        help_label.setStyleSheet("color: #666666; font-style: italic;")
+        layout.addWidget(help_label)
 
         # タグテーブルビュー
         self.tag_table = QTableView()
@@ -53,9 +62,27 @@ class TagDialog(QDialog):
         self.tag_table.setColumnWidth(1, 80)
         self.tag_table.setColumnWidth(2, 80)
         self.tag_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+
+        # 複数選択を可能にする
+        self.tag_table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.tag_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+
         self.tag_table.doubleClicked.connect(self._edit_tag)
+
+        # コンテキストメニュー
+        self.tag_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tag_table.customContextMenuRequested.connect(self._show_context_menu)
+
         layout.addWidget(self.tag_table)
+
+        # 選択情報ラベル
+        self.selection_info_label = QLabel("0 タグ選択中")
+        layout.addWidget(self.selection_info_label)
+
+        # タグテーブルの選択変更時のシグナル接続
+        self.tag_table.selectionModel().selectionChanged.connect(
+            self._on_selection_changed
+        )
 
         # 操作ボタンのレイアウト
         button_layout = QHBoxLayout()
@@ -83,15 +110,33 @@ class TagDialog(QDialog):
         button_layout.addStretch()
 
         # 編集・削除ボタン
-        edit_button = QPushButton("編集")
-        edit_button.clicked.connect(self._edit_tag)
-        button_layout.addWidget(edit_button)
+        self.edit_button = QPushButton("編集")
+        self.edit_button.clicked.connect(self._edit_tag)
+        self.edit_button.setEnabled(False)  # 初期状態では無効
+        button_layout.addWidget(self.edit_button)
 
-        delete_button = QPushButton("削除")
-        delete_button.clicked.connect(self._delete_tag)
-        button_layout.addWidget(delete_button)
+        self.delete_button = QPushButton("削除")
+        self.delete_button.clicked.connect(self._delete_tag)
+        self.delete_button.setEnabled(False)  # 初期状態では無効
+        button_layout.addWidget(self.delete_button)
 
         layout.addLayout(button_layout)
+
+        # 一括操作レイアウト
+        batch_layout = QHBoxLayout()
+
+        # 一括操作ボタン
+        self.batch_color_button = QPushButton("選択したタグの色を変更...")
+        self.batch_color_button.clicked.connect(self._change_selected_tags_color)
+        self.batch_color_button.setEnabled(False)  # 初期状態では無効
+        batch_layout.addWidget(self.batch_color_button)
+
+        self.batch_delete_button = QPushButton("選択したタグを削除")
+        self.batch_delete_button.clicked.connect(self._delete_selected_tags)
+        self.batch_delete_button.setEnabled(False)  # 初期状態では無効
+        batch_layout.addWidget(self.batch_delete_button)
+
+        layout.addLayout(batch_layout)
 
         # ダイアログボタン
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -127,6 +172,9 @@ class TagDialog(QDialog):
             )
 
         self.tag_table.resizeColumnsToContents()
+
+        # 選択情報を更新
+        self._update_selection_info()
 
     def _select_color(self):
         """色選択ダイアログを表示"""
@@ -175,8 +223,20 @@ class TagDialog(QDialog):
             QMessageBox.warning(self, "選択エラー", "編集するタグを選択してください。")
             return
 
+        # 選択行の重複を排除して取得
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        # 複数選択されている場合
+        if len(selected_rows) > 1:
+            QMessageBox.warning(
+                self, "選択エラー", "編集は一度に1つのタグのみ可能です。"
+            )
+            return
+
         # 選択された行のインデックス
-        row = selected_indexes[0].row()
+        row = list(selected_rows)[0]
 
         # タグのIDを取得
         tag = self.tags[row]
@@ -211,8 +271,18 @@ class TagDialog(QDialog):
             QMessageBox.warning(self, "選択エラー", "削除するタグを選択してください。")
             return
 
+        # 選択行の重複を排除して取得
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        # 複数選択されている場合
+        if len(selected_rows) > 1:
+            self._delete_selected_tags()
+            return
+
         # 選択された行のインデックス
-        row = selected_indexes[0].row()
+        row = list(selected_rows)[0]
 
         # タグのIDを取得
         tag = self.tags[row]
@@ -242,6 +312,191 @@ class TagDialog(QDialog):
             self._load_tags()
 
             logging.info(f"タグを削除しました: {tag.name}")
+
+    def _delete_selected_tags(self):
+        """選択した複数のタグを削除"""
+        selected_indexes = self.tag_table.selectedIndexes()
+        if not selected_indexes:
+            return
+
+        # 選択行の重複を排除して取得
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        # 行番号を降順にソート（削除時のインデックスずれを防ぐため）
+        selected_rows = sorted(list(selected_rows), reverse=True)
+
+        if not selected_rows:
+            return
+
+        # 選択したタグのリスト
+        selected_tags = [self.tags[row] for row in selected_rows]
+
+        # 使用数を合計
+        total_books_count = sum(len(tag.books) for tag in selected_tags)
+
+        # 削除前の確認
+        if len(selected_tags) == 1:
+            msg = f"タグ「{selected_tags[0].name}」を削除しますか？"
+        else:
+            msg = f"選択した{len(selected_tags)}個のタグを削除しますか？"
+
+            # タグ名を最大5個まで表示
+            tag_names = [tag.name for tag in selected_tags[:5]]
+            if len(selected_tags) > 5:
+                tag_names.append(f"...他{len(selected_tags) - 5}個")
+            msg += f"\n\n- " + "\n- ".join(tag_names)
+
+        if total_books_count > 0:
+            msg += (
+                f"\n\nこれらのタグは合計{total_books_count}冊の書籍に使用されています。"
+            )
+            msg += "\n削除すると、これらの書籍からタグが削除されます。"
+
+        reply = QMessageBox.question(
+            self,
+            "タグの削除",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # タグを削除
+            for tag in selected_tags:
+                self.db_manager.delete_tag(tag.id)
+                logging.info(f"タグを削除しました: {tag.name}")
+
+            # リストを更新
+            self._load_tags()
+
+            logging.info(f"{len(selected_tags)}個のタグを削除しました")
+
+    def _change_selected_tags_color(self):
+        """選択した複数のタグの色を変更"""
+        selected_indexes = self.tag_table.selectedIndexes()
+        if not selected_indexes:
+            return
+
+        # 選択行の重複を排除して取得
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        if not selected_rows:
+            return
+
+        # 選択したタグのリスト
+        selected_tags = [self.tags[row] for row in selected_rows]
+
+        # 共通の色があるか確認（最初のタグの色をデフォルトとする）
+        default_color = selected_tags[0].color if selected_tags else "#1E90FF"
+
+        # 色選択ダイアログを表示
+        current_color = QColor(default_color)
+        color = QColorDialog.getColor(current_color, self, "タグの色を選択")
+
+        if color.isValid():
+            # 選択したタグの色を更新
+            new_color = color.name()
+            for tag in selected_tags:
+                self.db_manager.update_tag(tag.id, {"color": new_color})
+                logging.info(f"タグ「{tag.name}」の色を変更しました: {new_color}")
+
+            # リストを更新
+            self._load_tags()
+
+            count_text = f"{len(selected_tags)}個の" if len(selected_tags) > 1 else ""
+            logging.info(f"{count_text}タグの色を変更しました")
+
+    def _show_context_menu(self, position):
+        """コンテキストメニューを表示"""
+        selected_indexes = self.tag_table.selectedIndexes()
+        if not selected_indexes:
+            return
+
+        # 選択行の重複を排除して取得
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        # メニューの作成
+        menu = QMenu(self)
+
+        if len(selected_rows) == 1:
+            # 単一選択の場合
+            edit_action = menu.addAction("編集")
+            edit_action.triggered.connect(self._edit_tag)
+
+            menu.addSeparator()
+
+            change_color_action = menu.addAction("色を変更...")
+            change_color_action.triggered.connect(
+                lambda: self._change_selected_tags_color()
+            )
+
+            menu.addSeparator()
+
+            delete_action = menu.addAction("削除")
+            delete_action.triggered.connect(self._delete_tag)
+        else:
+            # 複数選択の場合
+            change_color_action = menu.addAction(
+                f"選択した{len(selected_rows)}個のタグの色を変更..."
+            )
+            change_color_action.triggered.connect(self._change_selected_tags_color)
+
+            menu.addSeparator()
+
+            delete_action = menu.addAction(
+                f"選択した{len(selected_rows)}個のタグを削除"
+            )
+            delete_action.triggered.connect(self._delete_selected_tags)
+
+        # メニューを表示
+        menu.exec(self.tag_table.viewport().mapToGlobal(position))
+
+    def _on_selection_changed(self):
+        """選択変更時の処理"""
+        selected_indexes = self.tag_table.selectedIndexes()
+
+        # 選択行の重複を排除して取得
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        # ボタンの有効/無効を設定
+        has_selection = len(selected_rows) > 0
+        is_single_selection = len(selected_rows) == 1
+        is_multiple_selection = len(selected_rows) > 1
+
+        self.edit_button.setEnabled(is_single_selection)
+        self.delete_button.setEnabled(has_selection)
+        self.batch_color_button.setEnabled(has_selection)
+        self.batch_delete_button.setEnabled(is_multiple_selection)
+
+        # 選択情報を更新
+        self._update_selection_info()
+
+    def _update_selection_info(self):
+        """選択情報ラベルの更新"""
+        selected_indexes = self.tag_table.selectedIndexes()
+
+        # 選択行の重複を排除して取得
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        # 選択情報を表示
+        count = len(selected_rows)
+        if count == 0:
+            self.selection_info_label.setText("0 タグ選択中")
+        elif count == 1:
+            tag = self.tags[list(selected_rows)[0]]
+            self.selection_info_label.setText(f"1 タグ選択中: {tag.name}")
+        else:
+            self.selection_info_label.setText(f"{count} タグ選択中")
 
 
 class TagEditDialog(QDialog):

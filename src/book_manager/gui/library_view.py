@@ -487,6 +487,124 @@ class GridBookView(QScrollArea):
 
     def contextMenuEvent(self, event):
         """コンテキストメニューイベント"""
+        # 複数選択モードがオンの場合
+        if hasattr(self, "multi_select_mode") and self.multi_select_mode:
+            # クリックされた位置のアイテムを特定
+            for row_idx, widgets in self.visible_rows.items():
+                for widget in widgets:
+                    if widget.geometry().contains(
+                        event.pos() - self.content_widget.pos()
+                    ):
+                        index = widget.property("index")
+                        if index is not None:
+                            # 選択されていない場合は選択
+                            if index not in self.selected_indices:
+                                self._on_item_clicked(index)
+
+                            # 選択されているアイテムの数を確認
+                            selected_count = len(self.selected_indices)
+
+                            # コンテキストメニューを作成
+                            menu = QMenu(self)
+
+                            if selected_count == 1:
+                                # 単一選択の場合
+                                open_action = QAction("開く", self)
+                                open_action.triggered.connect(
+                                    lambda checked=False, idx=index: self._open_book(
+                                        idx
+                                    )
+                                )
+                                menu.addAction(open_action)
+
+                                edit_action = QAction("編集", self)
+                                edit_action.triggered.connect(
+                                    lambda checked=False, idx=index: self._edit_book(
+                                        idx
+                                    )
+                                )
+                                menu.addAction(edit_action)
+
+                                menu.addSeparator()
+
+                                delete_action = QAction("削除", self)
+                                delete_action.triggered.connect(
+                                    lambda checked=False, idx=index: self._delete_book(
+                                        idx
+                                    )
+                                )
+                                menu.addAction(delete_action)
+                            else:
+                                # 複数選択の場合
+                                books = self.get_selected_books()
+
+                                # 一括更新アクション
+                                update_action = QAction(
+                                    f"選択した{selected_count}冊を一括更新...", self
+                                )
+                                update_action.triggered.connect(
+                                    lambda: self._batch_update_books(books)
+                                )
+                                menu.addAction(update_action)
+
+                                menu.addSeparator()
+
+                                # お気に入り追加/削除
+                                add_favorite_action = QAction("お気に入りに追加", self)
+                                add_favorite_action.triggered.connect(
+                                    lambda: self._batch_set_favorite(books, True)
+                                )
+                                menu.addAction(add_favorite_action)
+
+                                remove_favorite_action = QAction(
+                                    "お気に入りから削除", self
+                                )
+                                remove_favorite_action.triggered.connect(
+                                    lambda: self._batch_set_favorite(books, False)
+                                )
+                                menu.addAction(remove_favorite_action)
+
+                                menu.addSeparator()
+
+                                # 読書状態変更
+                                reading_menu = menu.addMenu("読書状態を変更")
+
+                                unread_action = reading_menu.addAction("未読に設定")
+                                unread_action.triggered.connect(
+                                    lambda: self._batch_set_reading_status(
+                                        books, "未読"
+                                    )
+                                )
+
+                                reading_action = reading_menu.addAction("読書中に設定")
+                                reading_action.triggered.connect(
+                                    lambda: self._batch_set_reading_status(
+                                        books, "読書中"
+                                    )
+                                )
+
+                                completed_action = reading_menu.addAction("読了に設定")
+                                completed_action.triggered.connect(
+                                    lambda: self._batch_set_reading_status(
+                                        books, "読了"
+                                    )
+                                )
+
+                                menu.addSeparator()
+
+                                # 削除
+                                delete_action = QAction(
+                                    f"選択した{selected_count}冊を削除...", self
+                                )
+                                delete_action.triggered.connect(
+                                    lambda: self._batch_delete_books(books)
+                                )
+                                menu.addAction(delete_action)
+
+                            menu.exec(event.globalPos())
+                            return
+
+        # 複数選択モードでない場合の以前の処理
         # クリックされた位置のアイテムを特定
         for i in range(len(self.books)):
             spine = self.findChild(QFrame, f"book_spine_{i}")
@@ -554,6 +672,299 @@ class GridBookView(QScrollArea):
                 # 削除処理（実際の実装は親ウィジェットで行う）
                 # ここではシグナルのみ発行
                 self.book_selected.emit(book)
+
+    def setSelectionMode(self, multi_select):
+        """選択モードを設定"""
+        self.multi_select_mode = multi_select
+        self.selected_indices = (
+            set()
+            if multi_select
+            else {self.selected_index}
+            if self.selected_index >= 0
+            else set()
+        )
+
+    def get_selected_books(self):
+        """選択されている書籍のリストを取得"""
+        selected_books = []
+
+        for index in self.selected_indices:
+            if 0 <= index < len(self.books):
+                selected_books.append(self.books[index])
+
+        return selected_books
+
+    def _on_item_clicked(self, index):
+        """アイテムクリック時の処理"""
+        # 既存の選択状態をリセット
+        if not self.multi_select_mode:
+            # 単一選択モードの場合
+            if self.selected_index >= 0:
+                placeholder = self._find_placeholder_for_index(self.selected_index)
+                if placeholder:
+                    self._reset_placeholder_style(placeholder)
+
+            self.selected_index = index
+            self.selected_indices = {index}
+        else:
+            # 複数選択モードの場合
+            modifiers = QApplication.keyboardModifiers()
+
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                # Controlキーが押されている場合、トグル
+                if index in self.selected_indices:
+                    self.selected_indices.remove(index)
+                    placeholder = self._find_placeholder_for_index(index)
+                    if placeholder:
+                        self._reset_placeholder_style(placeholder)
+                else:
+                    self.selected_indices.add(index)
+            elif (
+                modifiers & Qt.KeyboardModifier.ShiftModifier
+                and self.selected_index >= 0
+            ):
+                # Shiftキーが押されている場合、範囲選択
+                start = min(self.selected_index, index)
+                end = max(self.selected_index, index) + 1
+
+                # 既存の選択に追加
+                for i in range(start, end):
+                    self.selected_indices.add(i)
+            else:
+                # 通常のクリック、既存の選択をクリア
+                for old_index in self.selected_indices:
+                    if old_index != index:
+                        placeholder = self._find_placeholder_for_index(old_index)
+                        if placeholder:
+                            self._reset_placeholder_style(placeholder)
+
+                self.selected_indices = {index}
+
+            # 最後にクリックしたインデックスを保存
+            self.selected_index = index
+
+        # 選択したアイテムのスタイルを更新
+        placeholder = self._find_placeholder_for_index(index)
+        if placeholder:
+            row = placeholder.property("row")
+            col = placeholder.property("col")
+            placeholder.setStyleSheet(
+                f"QWidget#placeholder_{row}_{col} {{ "
+                "    background-color: #d0d0ff; "
+                "    border-radius: 5px; "
+                "    border: 2px solid #6666cc; "
+                "}"
+            )
+
+        # 選択シグナルを発行（単一選択互換）
+        if 0 <= index < len(self.books):
+            self.book_selected.emit(self.books[index])
+
+    def _find_placeholder_for_index(self, index):
+        """インデックスに対応するプレースホルダーを探す"""
+        for row_idx, widgets in self.visible_rows.items():
+            for widget in widgets:
+                if widget.property("index") == index:
+                    return widget
+        return None
+
+    def _reset_placeholder_style(self, placeholder):
+        """プレースホルダーのスタイルをリセット"""
+        row = placeholder.property("row")
+        col = placeholder.property("col")
+        placeholder.setStyleSheet(
+            f"QWidget#placeholder_{row}_{col} {{ "
+            "    background-color: #f0f0f0; "
+            "    border-radius: 5px; "
+            "    border: 1px solid #cccccc; "
+            "}"
+            f"QWidget#placeholder_{row}_{col}:hover {{ "
+            "    background-color: #e0e0e0; "
+            "    border: 1px solid #aaaaaa; "
+            "}"
+        )
+
+    def _batch_update_books(self, books):
+        """複数の書籍を一括更新"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, LibraryView):
+            parent = parent.parent()
+
+        if parent and isinstance(parent, LibraryView):
+            parent.batch_update_selected_books()
+
+    def _batch_set_favorite(self, books, is_favorite):
+        """複数の書籍のお気に入り状態を一括設定"""
+        if not books:
+            return
+
+        action_text = "お気に入りに追加" if is_favorite else "お気に入りから削除"
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            parent,
+            f"{len(books)}冊を{action_text}",
+            f"選択した{len(books)}冊の書籍を{action_text}しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # お気に入り状態を更新
+                for book in books:
+                    library_manager.update_book_metadata(
+                        book.id, {"is_favorite": is_favorite}
+                    )
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent, "更新完了", f"{len(books)}冊の書籍を{action_text}しました。"
+                )
+
+    def _batch_set_reading_status(self, books, status):
+        """複数の書籍の読書状態を一括設定"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            parent,
+            f"{len(books)}冊の読書状態を変更",
+            f"選択した{len(books)}冊の書籍の読書状態を「{status}」に設定しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # 読書状態を更新
+                for book in books:
+                    library_manager.update_book_metadata(
+                        book.id, {"reading_status": status}
+                    )
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent,
+                    "更新完了",
+                    f"{len(books)}冊の書籍の読書状態を「{status}」に設定しました。",
+                )
+
+    def _batch_delete_books(self, books):
+        """複数の書籍を一括削除"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 削除前の確認
+        msg = (
+            f"選択した{len(books)}冊の書籍を削除しますか？\nこの操作は元に戻せません。"
+        )
+
+        # 書籍名を最大5冊まで表示
+        book_titles = [book.title for book in books[:5]]
+        if len(books) > 5:
+            book_titles.append(f"...他{len(books) - 5}冊")
+        msg += f"\n\n- " + "\n- ".join(book_titles)
+
+        reply = QMessageBox.question(
+            parent,
+            "書籍の一括削除",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # ファイルも削除するか尋ねる
+            delete_file_reply = QMessageBox.question(
+                parent,
+                "ファイルの削除",
+                "PDFファイルも削除しますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            delete_file = delete_file_reply == QMessageBox.StandardButton.Yes
+
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # 書籍を削除
+                deleted_count = 0
+                for book in books:
+                    if library_manager.delete_book(book.id, delete_file):
+                        deleted_count += 1
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent, "削除完了", f"{deleted_count}冊の書籍を削除しました。"
+                )
 
 
 class ListBookView(QTableView):
@@ -690,6 +1101,208 @@ class ListBookView(QTableView):
             # 削除処理（実際の実装は親ウィジェットで行う）
             # ここではシグナルのみ発行
             self.book_selected.emit(book)
+
+    def get_selected_books(self):
+        """選択されている書籍のリストを取得"""
+        selected_books = []
+
+        # 選択されている行のインデックスを取得
+        selected_indexes = self.selectedIndexes()
+
+        # 選択行の重複を排除して取得（行単位の選択）
+        selected_rows = set()
+        for index in selected_indexes:
+            selected_rows.add(index.row())
+
+        # 各行の書籍を取得
+        for row in selected_rows:
+            title_item = self.model.item(row, 0)
+            book = title_item.data(Qt.ItemDataRole.UserRole)
+            selected_books.append(book)
+
+        return selected_books
+
+    def _batch_update_books(self, books):
+        """複数の書籍を一括更新"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, LibraryView):
+            parent = parent.parent()
+
+        if parent and isinstance(parent, LibraryView):
+            parent.batch_update_selected_books()
+
+    def _batch_set_favorite(self, books, is_favorite):
+        """複数の書籍のお気に入り状態を一括設定"""
+        if not books:
+            return
+
+        action_text = "お気に入りに追加" if is_favorite else "お気に入りから削除"
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            parent,
+            f"{len(books)}冊を{action_text}",
+            f"選択した{len(books)}冊の書籍を{action_text}しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # お気に入り状態を更新
+                for book in books:
+                    library_manager.update_book_metadata(
+                        book.id, {"is_favorite": is_favorite}
+                    )
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent, "更新完了", f"{len(books)}冊の書籍を{action_text}しました。"
+                )
+
+    def _batch_set_reading_status(self, books, status):
+        """複数の書籍の読書状態を一括設定"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            parent,
+            f"{len(books)}冊の読書状態を変更",
+            f"選択した{len(books)}冊の書籍の読書状態を「{status}」に設定しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # 読書状態を更新
+                for book in books:
+                    library_manager.update_book_metadata(
+                        book.id, {"reading_status": status}
+                    )
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent,
+                    "更新完了",
+                    f"{len(books)}冊の書籍の読書状態を「{status}」に設定しました。",
+                )
+
+    def _batch_delete_books(self, books):
+        """複数の書籍を一括削除"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 削除前の確認
+        msg = (
+            f"選択した{len(books)}冊の書籍を削除しますか？\nこの操作は元に戻せません。"
+        )
+
+        # 書籍名を最大5冊まで表示
+        book_titles = [book.title for book in books[:5]]
+        if len(books) > 5:
+            book_titles.append(f"...他{len(books) - 5}冊")
+        msg += f"\n\n- " + "\n- ".join(book_titles)
+
+        reply = QMessageBox.question(
+            parent,
+            "書籍の一括削除",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # ファイルも削除するか尋ねる
+            delete_file_reply = QMessageBox.question(
+                parent,
+                "ファイルの削除",
+                "PDFファイルも削除しますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            delete_file = delete_file_reply == QMessageBox.StandardButton.Yes
+
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # 書籍を削除
+                deleted_count = 0
+                for book in books:
+                    if library_manager.delete_book(book.id, delete_file):
+                        deleted_count += 1
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent, "削除完了", f"{deleted_count}冊の書籍を削除しました。"
+                )
 
 
 class BookshelfView(QScrollArea):
@@ -991,6 +1604,306 @@ class BookshelfView(QScrollArea):
         # 選択シグナルを発行
         self.book_selected.emit(self.books[index])
 
+    def setSelectionMode(self, multi_select):
+        """選択モードを設定"""
+        self.multi_select_mode = multi_select
+        self.selected_indices = (
+            set()
+            if multi_select
+            else {self.selected_index}
+            if self.selected_index >= 0
+            else set()
+        )
+
+    def get_selected_books(self):
+        """選択されている書籍のリストを取得"""
+        selected_books = []
+
+        for index in self.selected_indices:
+            if 0 <= index < len(self.books):
+                selected_books.append(self.books[index])
+
+        return selected_books
+
+    def _on_spine_clicked(self, index):
+        """背表紙クリック時の処理"""
+        # 既存の選択状態をリセット
+        if not self.multi_select_mode:
+            # 単一選択モードの場合
+            if 0 <= self.selected_index < len(self.books):
+                spine = self.findChild(QFrame, f"book_spine_{self.selected_index}")
+                if spine:
+                    # もとの色に戻す
+                    original_color = spine.property("book_color")
+                    palette = spine.palette()
+                    palette.setColor(spine.backgroundRole(), original_color)
+                    spine.setPalette(palette)
+
+                    # 線の色を戻す
+                    spine.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+                    spine.setLineWidth(1)
+
+                    spine.setProperty("selected", False)
+
+            self.selected_index = index
+            self.selected_indices = {index}
+        else:
+            # 複数選択モードの場合
+            modifiers = QApplication.keyboardModifiers()
+
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                # Controlキーが押されている場合、トグル
+                if index in self.selected_indices:
+                    self.selected_indices.remove(index)
+                    spine = self.findChild(QFrame, f"book_spine_{index}")
+                    if spine:
+                        # もとの色に戻す
+                        original_color = spine.property("book_color")
+                        palette = spine.palette()
+                        palette.setColor(spine.backgroundRole(), original_color)
+                        spine.setPalette(palette)
+
+                        # 線の色を戻す
+                        spine.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+                        spine.setLineWidth(1)
+
+                        spine.setProperty("selected", False)
+                else:
+                    self.selected_indices.add(index)
+            elif (
+                modifiers & Qt.KeyboardModifier.ShiftModifier
+                and self.selected_index >= 0
+            ):
+                # Shiftキーが押されている場合、範囲選択
+                start = min(self.selected_index, index)
+                end = max(self.selected_index, index) + 1
+
+                # 既存の選択に追加
+                for i in range(start, end):
+                    self.selected_indices.add(i)
+            else:
+                # 通常のクリック、既存の選択をクリア
+                for old_index in self.selected_indices:
+                    if old_index != index:
+                        spine = self.findChild(QFrame, f"book_spine_{old_index}")
+                        if spine:
+                            # もとの色に戻す
+                            original_color = spine.property("book_color")
+                            palette = spine.palette()
+                            palette.setColor(spine.backgroundRole(), original_color)
+                            spine.setPalette(palette)
+
+                            # 線の色を戻す
+                            spine.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
+                            spine.setLineWidth(1)
+
+                            spine.setProperty("selected", False)
+
+                self.selected_indices = {index}
+
+            # 最後にクリックしたインデックスを保存
+            self.selected_index = index
+
+        # 選択したアイテムのスタイルを更新
+        spine = self.findChild(QFrame, f"book_spine_{index}")
+        if spine:
+            # 選択色に変更
+            palette = spine.palette()
+            palette.setColor(spine.backgroundRole(), QColor(255, 255, 0))  # 黄色
+            spine.setPalette(palette)
+
+            # 枠線を強調
+            spine.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
+            spine.setLineWidth(2)
+
+            spine.setProperty("selected", True)
+
+        # 選択シグナルを発行（単一選択互換）
+        if 0 <= index < len(self.books):
+            self.book_selected.emit(self.books[index])
+
+    def _batch_update_books(self, books):
+        """複数の書籍を一括更新"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, LibraryView):
+            parent = parent.parent()
+
+        if parent and isinstance(parent, LibraryView):
+            parent.batch_update_selected_books()
+
+    def _batch_set_favorite(self, books, is_favorite):
+        """複数の書籍のお気に入り状態を一括設定"""
+        if not books:
+            return
+
+        action_text = "お気に入りに追加" if is_favorite else "お気に入りから削除"
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            parent,
+            f"{len(books)}冊を{action_text}",
+            f"選択した{len(books)}冊の書籍を{action_text}しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # お気に入り状態を更新
+                for book in books:
+                    library_manager.update_book_metadata(
+                        book.id, {"is_favorite": is_favorite}
+                    )
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent, "更新完了", f"{len(books)}冊の書籍を{action_text}しました。"
+                )
+
+    def _batch_set_reading_status(self, books, status):
+        """複数の書籍の読書状態を一括設定"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 確認ダイアログ
+        reply = QMessageBox.question(
+            parent,
+            f"{len(books)}冊の読書状態を変更",
+            f"選択した{len(books)}冊の書籍の読書状態を「{status}」に設定しますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # 読書状態を更新
+                for book in books:
+                    library_manager.update_book_metadata(
+                        book.id, {"reading_status": status}
+                    )
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent,
+                    "更新完了",
+                    f"{len(books)}冊の書籍の読書状態を「{status}」に設定しました。",
+                )
+
+    def _batch_delete_books(self, books):
+        """複数の書籍を一括削除"""
+        if not books:
+            return
+
+        # 親ウィジェットを探す
+        parent = self
+        while parent and not isinstance(parent, QWidget):
+            parent = parent.parent()
+
+        # 削除前の確認
+        msg = (
+            f"選択した{len(books)}冊の書籍を削除しますか？\nこの操作は元に戻せません。"
+        )
+
+        # 書籍名を最大5冊まで表示
+        book_titles = [book.title for book in books[:5]]
+        if len(books) > 5:
+            book_titles.append(f"...他{len(books) - 5}冊")
+        msg += f"\n\n- " + "\n- ".join(book_titles)
+
+        reply = QMessageBox.question(
+            parent,
+            "書籍の一括削除",
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # ファイルも削除するか尋ねる
+            delete_file_reply = QMessageBox.question(
+                parent,
+                "ファイルの削除",
+                "PDFファイルも削除しますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            delete_file = delete_file_reply == QMessageBox.StandardButton.Yes
+
+            # 親ウィジェットのライブラリマネージャーを探す
+            library_manager = None
+            temp_parent = parent
+            while temp_parent:
+                if hasattr(temp_parent, "library_manager"):
+                    library_manager = temp_parent.library_manager
+                    break
+                temp_parent = temp_parent.parent()
+
+            if library_manager:
+                # 書籍を削除
+                deleted_count = 0
+                for book in books:
+                    if library_manager.delete_book(book.id, delete_file):
+                        deleted_count += 1
+
+                # 親ウィジェットを更新
+                library_view = self.parent()
+                while library_view and not isinstance(library_view, LibraryView):
+                    library_view = library_view.parent()
+
+                if library_view:
+                    library_view.refresh()
+
+                QMessageBox.information(
+                    parent, "削除完了", f"{deleted_count}冊の書籍を削除しました。"
+                )
+
 
 class LibraryView(QWidget):
     """ライブラリビューのメインクラス"""
@@ -1142,3 +2055,57 @@ class LibraryView(QWidget):
         """書籍が選択されたときの処理"""
         # 書籍を開くリクエストを発行
         self.book_open_requested.emit(book)
+
+    def _enable_multiple_selection(self):
+        """ライブラリビューで複数選択を有効にする"""
+        # グリッドビューの複数選択を有効にする
+        self.grid_view.setSelectionMode(True)
+
+        # リストビューは既に複数選択をサポートしているので処理不要
+
+        # 本棚ビューの複数選択を有効にする
+        self.bookshelf_view.setSelectionMode(True)
+
+    def get_selected_books(self):
+        """現在の表示モードで選択されている書籍のリストを取得"""
+        selected_books = []
+
+        if self.current_view == self.grid_view:
+            selected_books = self.grid_view.get_selected_books()
+        elif self.current_view == self.list_view:
+            selected_books = self.list_view.get_selected_books()
+        elif self.current_view == self.bookshelf_view:
+            selected_books = self.bookshelf_view.get_selected_books()
+
+        return selected_books
+
+    def batch_update_selected_books(self):
+        """選択した書籍を一括更新"""
+        selected_books = self.get_selected_books()
+
+        if not selected_books:
+            QMessageBox.warning(self, "選択エラー", "更新する書籍を選択してください。")
+            return
+
+        # 一括更新ダイアログを表示
+        from book_manager.gui.dialogs.batch_book_dialog import BatchBookUpdateDialog
+
+        dialog = BatchBookUpdateDialog(self.library_manager, selected_books, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 更新データを取得
+            update_data = dialog.get_update_data()
+
+            # 一括更新を適用
+            from book_manager.gui.dialogs.batch_book_dialog import apply_batch_update
+
+            count = apply_batch_update(
+                self.library_manager, selected_books, update_data
+            )
+
+            if count > 0:
+                QMessageBox.information(
+                    self, "一括更新完了", f"{count}冊の書籍を更新しました。"
+                )
+
+                # ビューを更新
+                self.refresh()

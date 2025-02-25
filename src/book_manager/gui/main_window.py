@@ -485,33 +485,102 @@ class MainWindow(QMainWindow):
 
     def _configure_library_paths(self):
         """ライブラリパスの設定"""
-        # ここではライブラリパス設定ダイアログを表示
-        # 具体的な実装は省略
-        pass
+        from book_manager.gui.dialogs.library_paths_dialog import LibraryPathsDialog
+
+        dialog = LibraryPathsDialog(self.config, self)
+        result = dialog.exec()
+
+        if result == QDialog.DialogCode.Accepted:
+            # パスが変更された場合、ライブラリを再スキャンするか尋ねる
+            reply = QMessageBox.question(
+                self,
+                "ライブラリのスキャン",
+                "ライブラリパスが変更されました。今すぐライブラリをスキャンしますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self._scan_libraries()
 
     def _open_settings(self):
         """設定ダイアログを開く"""
-        # ここでは設定ダイアログを表示
-        # 具体的な実装は省略
-        pass
+        from book_manager.gui.dialogs.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog(self.config, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 設定が変更された場合、UIを更新
+            self._update_ui_from_settings()
+
+            # ライブラリビューの更新
+            self._update_views()
+
+    def _update_ui_from_settings(self):
+        """設定に基づいてUIを更新"""
+        # ウィンドウタイトルの更新
+        self.setWindowTitle(self.config.get("app_name", "PDF Library"))
+
+        # テーマの更新
+        theme = self.config.get("ui.theme", "light")
+        self._apply_theme(theme)
+
+        # 表示モードの更新
+        default_view = self.config.get("ui.default_view", "grid")
+        view_index = 0
+        if default_view == "grid":
+            view_index = 0
+        elif default_view == "list":
+            view_index = 1
+        elif default_view == "bookshelf":
+            view_index = 2
+
+        # コンボボックスを更新（シグナルの発生を防ぐためブロック）
+        self.view_mode_combo.blockSignals(True)
+        self.view_mode_combo.setCurrentIndex(view_index)
+        self.view_mode_combo.blockSignals(False)
+
+        # アクションの更新
+        for i, mode in enumerate(["grid", "list", "bookshelf"]):
+            action = None
+            if mode == "grid":
+                action = self.findChild(QAction, "grid_view_action")
+            elif mode == "list":
+                action = self.findChild(QAction, "list_view_action")
+            elif mode == "bookshelf":
+                action = self.findChild(QAction, "bookshelf_view_action")
+
+            if action:
+                action.setChecked(default_view == mode)
 
     def _manage_tags(self):
         """タグ管理ダイアログを開く"""
-        # ここではタグ管理ダイアログを表示
-        # 具体的な実装は省略
-        pass
+        from book_manager.gui.dialogs.tag_dialog import TagDialog
+
+        dialog = TagDialog(self.library_manager.db, self)
+        dialog.exec()
+
+        # 必要に応じてビューを更新
+        self._update_views()
 
     def _manage_series(self):
         """シリーズ管理ダイアログを開く"""
-        # ここではシリーズ管理ダイアログを表示
-        # 具体的な実装は省略
-        pass
+        from book_manager.gui.dialogs.series_dialog import SeriesDialog
+
+        dialog = SeriesDialog(self.library_manager.db, self)
+        dialog.exec()
+
+        # 必要に応じてビューを更新
+        self._update_views()
 
     def _manage_categories(self):
         """カテゴリ管理ダイアログを開く"""
-        # ここではカテゴリ管理ダイアログを表示
-        # 具体的な実装は省略
-        pass
+        from book_manager.gui.dialogs.category_dialog import CategoryDialog
+
+        dialog = CategoryDialog(self.library_manager.db, self)
+        dialog.exec()
+
+        # 必要に応じてビューを更新
+        self._update_views()
 
     def _change_view_mode(self, mode):
         """表示モードの変更"""
@@ -568,9 +637,20 @@ class MainWindow(QMainWindow):
         self._update_views()
 
     def _search_books(self, search_term):
-        """書籍の検索"""
-        # 検索結果の表示（後で実装）
-        pass
+        """書籍を検索"""
+        from gui.library_view import LibraryView
+
+        if not search_term.strip():
+            # 空の検索語の場合は全ての書籍を表示
+            self._update_views()
+            return
+
+        # ライブラリビューの取得
+        library_view = self.findChild(LibraryView)
+        if library_view:
+            # 検索を実行
+            count = library_view.search(search_term)
+            self.status_bar.showMessage(f'検索結果: {count}件 - "{search_term}"')
 
     def _update_views(self):
         """ビューの更新"""
@@ -620,3 +700,70 @@ class MainWindow(QMainWindow):
 
             if reply == QMessageBox.StandardButton.Yes:
                 self._scan_libraries()
+
+    def _apply_theme(self, theme):
+        """テーマを適用"""
+        if theme == "dark":
+            # ダークテーマの適用
+            style_sheet = """
+            QWidget {
+                background-color: #2D2D30;
+                color: #FFFFFF;
+            }
+            QMenuBar, QMenu {
+                background-color: #1E1E1E;
+                color: #FFFFFF;
+            }
+            QToolBar {
+                background-color: #2D2D30;
+                border-bottom: 1px solid #3F3F46;
+            }
+            QStatusBar {
+                background-color: #007ACC;
+                color: #FFFFFF;
+            }
+            QLineEdit, QTextEdit {
+                background-color: #1E1E1E;
+                color: #FFFFFF;
+                border: 1px solid #3F3F46;
+            }
+            QPushButton {
+                background-color: #0E639C;
+                color: #FFFFFF;
+                border: 1px solid #0E639C;
+                padding: 4px 8px;
+            }
+            QPushButton:hover {
+                background-color: #1177BB;
+            }
+            QPushButton:pressed {
+                background-color: #0D5789;
+            }
+            QTabWidget::pane {
+                border: 1px solid #3F3F46;
+            }
+            QTabBar::tab {
+                background-color: #2D2D30;
+                color: #FFFFFF;
+                padding: 6px 10px;
+                border: 1px solid #3F3F46;
+            }
+            QTabBar::tab:selected {
+                background-color: #007ACC;
+            }
+            QTableView, QListView, QTreeView {
+                background-color: #1E1E1E;
+                color: #FFFFFF;
+                alternate-background-color: #2D2D30;
+                border: 1px solid #3F3F46;
+            }
+            QHeaderView::section {
+                background-color: #2D2D30;
+                color: #FFFFFF;
+                border: 1px solid #3F3F46;
+            }
+            """
+            self.setStyleSheet(style_sheet)
+        else:
+            # ライトテーマ（デフォルト）
+            self.setStyleSheet("")

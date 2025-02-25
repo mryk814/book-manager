@@ -545,3 +545,134 @@ class DatabaseManager:
             .order_by(Bookmark.page)
             .all()
         )
+
+    def update_category(self, category_id, name, description=None, display_order=0):
+        """
+        カテゴリを更新
+
+        Args:
+            category_id (int): カテゴリID
+            name (str): カテゴリ名
+            description (str): 説明
+            display_order (int): 表示順
+
+        Returns:
+            Category: 更新されたカテゴリオブジェクト
+        """
+        category = self.session.query(Category).get(category_id)
+        if not category:
+            logging.error(f"カテゴリが見つかりません: ID {category_id}")
+            return None
+
+        category.name = name
+        if description is not None:
+            category.description = description
+        category.display_order = display_order
+
+        self.session.commit()
+        return category
+
+    def update_category_display_order(self, category_id, display_order):
+        """
+        カテゴリの表示順を更新
+
+        Args:
+            category_id (int): カテゴリID
+            display_order (int): 表示順
+
+        Returns:
+            Category: 更新されたカテゴリオブジェクト
+        """
+        category = self.session.query(Category).get(category_id)
+        if not category:
+            logging.error(f"カテゴリが見つかりません: ID {category_id}")
+            return None
+
+        category.display_order = display_order
+        self.session.commit()
+        return category
+
+    def delete_category(self, category_id):
+        """
+        カテゴリを削除（関連するビューも削除）
+
+        Args:
+            category_id (int): カテゴリID
+
+        Returns:
+            bool: 削除成功の場合True
+        """
+        category = self.session.query(Category).get(category_id)
+        if not category:
+            logging.error(f"カテゴリが見つかりません: ID {category_id}")
+            return False
+
+        # 関連するビューを削除
+        views = self.session.query(View).filter_by(category_id=category_id).all()
+        for view in views:
+            self.session.delete(view)
+
+        # カテゴリを削除
+        self.session.delete(category)
+        self.session.commit()
+        logging.info(f"カテゴリを削除しました: ID {category_id}")
+        return True
+
+    def create_view(self, view_data):
+        """
+        ビューを作成
+
+        Args:
+            view_data (dict): ビューデータ
+
+        Returns:
+            View: 作成されたビューオブジェクト
+        """
+        new_view = View(**view_data)
+        self.session.add(new_view)
+        self.session.commit()
+        logging.info(f"ビューを作成しました: {new_view.name}")
+        return new_view
+
+    def update_view(self, view_id, view_data):
+        """
+        ビューを更新
+
+        Args:
+            view_id (int): ビューID
+            view_data (dict): 更新データ
+
+        Returns:
+            View: 更新されたビューオブジェクト
+        """
+        view = self.session.query(View).get(view_id)
+        if not view:
+            logging.error(f"ビューが見つかりません: ID {view_id}")
+            return None
+
+        for key, value in view_data.items():
+            setattr(view, key, value)
+
+        self.session.commit()
+        logging.info(f"ビューを更新しました: ID {view_id}")
+        return view
+
+    def delete_view(self, view_id):
+        """
+        ビューを削除
+
+        Args:
+            view_id (int): ビューID
+
+        Returns:
+            bool: 削除成功の場合True
+        """
+        view = self.session.query(View).get(view_id)
+        if not view:
+            logging.error(f"ビューが見つかりません: ID {view_id}")
+            return False
+
+        self.session.delete(view)
+        self.session.commit()
+        logging.info(f"ビューを削除しました: ID {view_id}")
+        return True

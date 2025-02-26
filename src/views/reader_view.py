@@ -366,16 +366,20 @@ class PDFReaderView(QWidget):
 
         # 状態の自動判定
         status = None
-        if self.current_page_num == 0:
+
+        # すでにCompletedに設定されている場合は、どのページにいても維持する
+        if book.status == book.STATUS_COMPLETED:
+            status = book.STATUS_COMPLETED
+        # それ以外の場合は現在のページに基づいて判定
+        elif self.current_page_num == 0 and book.status != book.STATUS_COMPLETED:
+            # 最初のページで、かつまだCompletedでない場合のみUnread
             status = book.STATUS_UNREAD
-        elif self.current_page_num >= book.total_pages - 1:  # 最後のページか、その近く
+        elif self.current_page_num >= book.total_pages - 1:
+            # 最後のページならCompleted
             status = book.STATUS_COMPLETED
         else:
-            # すでにCompletedに設定されている場合は維持する（Unreadに明示的に戻されない限り）
-            if book.status == book.STATUS_COMPLETED:
-                status = book.STATUS_COMPLETED
-            else:
-                status = book.STATUS_READING
+            # それ以外はReading
+            status = book.STATUS_READING
 
         # 進捗を更新
         self.library_controller.update_book_progress(

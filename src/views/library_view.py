@@ -483,7 +483,9 @@ class LibraryGridView(QScrollArea):
         """
         # 右クリックの場合はコンテキストメニューを表示
         if event.button() == Qt.MouseButton.RightButton:
-            self._show_context_menu(event.globalPos(), book_id)
+            # PyQt6では globalPos() が非推奨になり、globalPosition().toPoint() を使用する
+            global_pos = event.globalPosition().toPoint()
+            self._show_context_menu(global_pos, book_id)
             return
 
         # 以前の選択をクリア

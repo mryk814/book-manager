@@ -537,16 +537,34 @@ class MainWindow(QMainWindow):
         )
 
         if result == QMessageBox.StandardButton.Yes:
+            # 現在開いている書籍がこれなら閉じる
+            if self.reader_view.current_book_id == book_id:
+                self.reader_view.close_current_book()
+
             # 書籍を削除
             success = self.library_controller.remove_book(book_id, delete_file=False)
 
             if success:
-                # 現在開いている書籍がこれなら閉じる
-                if self.reader_view.current_book_id == book_id:
-                    self.reader_view.close_current_book()
+                # 個別にリストから削除（全更新を避けてパフォーマンス向上）
+                if book_id in self.grid_view.book_widgets:
+                    widget = self.grid_view.book_widgets[book_id]
+                    widget.setParent(None)
+                    widget.deleteLater()
+                    del self.grid_view.book_widgets[book_id]
 
-                # ライブラリを更新
-                self.refresh_library()
+                # リストビューからも削除
+                for i in range(self.list_view.list_widget.count()):
+                    item = self.list_view.list_widget.item(i)
+                    if item and item.data(Qt.ItemDataRole.UserRole) == book_id:
+                        self.list_view.list_widget.takeItem(i)
+                        break
+
+                # 選択状態をクリア
+                if self.grid_view.selected_book_id == book_id:
+                    self.grid_view.selected_book_id = None
+                if self.list_view.get_selected_book_id() == book_id:
+                    self.list_view.list_widget.clearSelection()
+
                 self.statusBar.showMessage(f"Book '{book.title}' removed from library")
 
     def show_settings_dialog(self):

@@ -51,6 +51,7 @@ class PDFReaderView(QWidget):
         self.current_book_id = None
         self.current_page_num = 0
         self.zoom_factor = 1.0
+        self.auto_fit = True  # 自動フィット機能を有効化
 
         # レイアウトの設定
         self.layout = QVBoxLayout(self)
@@ -119,16 +120,6 @@ class PDFReaderView(QWidget):
         self.zoom_out_button = QPushButton("Zoom Out")
         self.zoom_out_button.clicked.connect(self.zoom_out)
         self.toolbar.addWidget(self.zoom_out_button)
-
-        # フィットボタン
-        self.toolbar.addSeparator()
-        self.fit_width_button = QPushButton("Fit Width")
-        self.fit_width_button.clicked.connect(self.fit_to_width)
-        self.toolbar.addWidget(self.fit_width_button)
-
-        self.fit_page_button = QPushButton("Fit Page")
-        self.fit_page_button.clicked.connect(self.fit_to_page)
-        self.toolbar.addWidget(self.fit_page_button)
 
     def setup_statusbar(self):
         """ステータスバーを設定する。"""
@@ -276,8 +267,6 @@ class PDFReaderView(QWidget):
         self.zoom_combo.setEnabled(has_book)
         self.zoom_in_button.setEnabled(has_book)
         self.zoom_out_button.setEnabled(has_book)
-        self.fit_width_button.setEnabled(has_book)
-        self.fit_page_button.setEnabled(has_book)
 
         # ステータスバーの有効/無効を設定
         self.progress_slider.setEnabled(has_book)
@@ -382,7 +371,11 @@ class PDFReaderView(QWidget):
         elif self.current_page_num >= book.total_pages - 1:  # 最後のページか、その近く
             status = book.STATUS_COMPLETED
         else:
-            status = book.STATUS_READING
+            # すでにCompletedに設定されている場合は維持する（Unreadに明示的に戻されない限り）
+            if book.status == book.STATUS_COMPLETED:
+                status = book.STATUS_COMPLETED
+            else:
+                status = book.STATUS_READING
 
         # 進捗を更新
         self.library_controller.update_book_progress(
@@ -502,6 +495,21 @@ class PDFReaderView(QWidget):
     def zoom_out(self):
         """ズームアウト（縮小）する。"""
         self.set_zoom(self.zoom_factor / 1.2)
+
+    def resizeEvent(self, event):
+        """
+        ウィジェットのリサイズイベント。
+
+        Parameters
+        ----------
+        event : QResizeEvent
+            リサイズイベント
+        """
+        super().resizeEvent(event)
+
+        # 自動フィットが有効で、書籍が開かれている場合は自動的にフィット
+        if self.auto_fit and self.current_book_id:
+            self.fit_to_page()
 
     def fit_to_width(self):
         """ページを幅に合わせる。"""

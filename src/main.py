@@ -84,7 +84,17 @@ def load_settings():
     if settings_path.exists():
         try:
             with open(settings_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                loaded_settings = json.load(f)
+
+                # データベースパスの検証
+                db_path = loaded_settings.get("paths", {}).get("database_path", "")
+                if not db_path or not os.path.dirname(db_path):
+                    loaded_settings.setdefault("paths", {})["database_path"] = str(
+                        get_app_data_dir() / "library.db"
+                    )
+                    logging.warning(f"Invalid database path in settings, using default")
+
+                return loaded_settings
         except Exception as e:
             logging.error(f"Error loading settings: {e}")
 
@@ -111,11 +121,29 @@ def main():
     # 設定を読み込む
     settings = load_settings()
 
-    # データベースパスを取得
+    # データベースパスを取得して確認
     db_path = settings["paths"]["database_path"]
 
+    # パスが空か無効な場合はデフォルトのパスを設定
+    if not db_path or os.path.dirname(db_path) == "":
+        # データベースファイル名だけが指定されている場合や、パスが無効な場合
+        db_path = str(get_app_data_dir() / "library.db")
+        settings["paths"]["database_path"] = db_path
+        logging.warning(f"Invalid database path detected, using default: {db_path}")
+
+        # 設定を保存
+        try:
+            settings_path = get_app_data_dir() / "settings.json"
+            os.makedirs(os.path.dirname(str(settings_path)), exist_ok=True)
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            logging.error(f"Error saving settings: {e}")
+
     # データベースディレクトリを作成
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    db_dir = os.path.dirname(db_path)
+    if db_dir:  # ディレクトリパスが空でない場合のみ作成
+        os.makedirs(db_dir, exist_ok=True)
 
     # メインウィンドウを作成
     window = MainWindow(db_path)

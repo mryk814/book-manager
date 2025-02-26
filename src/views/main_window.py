@@ -97,6 +97,9 @@ class MainWindow(QMainWindow):
         # シグナルとスロットの接続
         self.setup_connections()
 
+        # コンテキストメニュー機能の設定
+        self.setup_context_menu_handlers()
+
     def setup_toolbar(self):
         """ツールバーを設定する。"""
         self.toolbar = QToolBar("Main Toolbar")
@@ -241,6 +244,18 @@ class MainWindow(QMainWindow):
         self.reader_view = PDFReaderView(self.library_controller)
         self.reader_layout.addWidget(self.reader_view)
 
+    def setup_context_menu_handlers(self):
+        """コンテキストメニュー機能のハンドラを設定する。"""
+        # グリッドビューのコンテキストメニューハンドラ
+        self.grid_view._edit_metadata = self.show_metadata_editor
+        self.grid_view._add_to_series = self.show_add_to_series_dialog
+        self.grid_view._remove_book = self.remove_book
+
+        # リストビューのコンテキストメニューハンドラ
+        self.list_view._edit_metadata = self.show_metadata_editor
+        self.list_view._add_to_series = self.show_add_to_series_dialog
+        self.list_view._remove_book = self.remove_book
+
     def setup_connections(self):
         """シグナルとスロットを接続する。"""
         # グリッドビューからの選択シグナル
@@ -251,6 +266,18 @@ class MainWindow(QMainWindow):
 
         # リーダービューからの進捗更新シグナル
         self.reader_view.progress_updated.connect(self.on_progress_updated)
+
+    def setup_context_menu_handlers(self):
+        """コンテキストメニュー機能のハンドラを設定する。"""
+        # グリッドビューのコンテキストメニューハンドラ
+        self.grid_view._edit_metadata = self.show_metadata_editor
+        self.grid_view._add_to_series = self.show_add_to_series_dialog
+        self.grid_view._remove_book = self.remove_book
+
+        # リストビューのコンテキストメニューハンドラ
+        self.list_view._edit_metadata = self.show_metadata_editor
+        self.list_view._add_to_series = self.show_add_to_series_dialog
+        self.list_view._remove_book = self.remove_book
 
     def populate_category_combo(self):
         """カテゴリコンボボックスにデータを設定する。"""
@@ -374,21 +401,153 @@ class MainWindow(QMainWindow):
             self.refresh_library()
             self.statusBar.showMessage("Books imported successfully")
 
-    def show_metadata_editor(self):
-        """メタデータ編集ダイアログを表示する。"""
-        # 現在選択されている書籍を取得
-        selected_book_id = (
-            self.grid_view.get_selected_book_id()
-            or self.list_view.get_selected_book_id()
-        )
+    def show_metadata_editor(self, book_id=None):
+        """
+        メタデータ編集ダイアログを表示する。
 
-        if selected_book_id:
-            dialog = MetadataEditor(self.library_controller, selected_book_id, self)
+        Parameters
+        ----------
+        book_id : int, optional
+            編集する書籍のID。指定されない場合は現在選択されている書籍を使用。
+        """
+        # 書籍IDが指定されていない場合は現在選択されている書籍を使用
+        if book_id is None:
+            book_id = (
+                self.grid_view.get_selected_book_id()
+                or self.list_view.get_selected_book_id()
+            )
+
+        if book_id:
+            dialog = MetadataEditor(self.library_controller, book_id, self)
             if dialog.exec():
                 # ビューを更新
-                self.grid_view.update_book_item(selected_book_id)
-                self.list_view.update_book_item(selected_book_id)
+                self.grid_view.update_book_item(book_id)
+                self.list_view.update_book_item(book_id)
                 self.statusBar.showMessage("Metadata updated successfully")
+
+    def show_add_to_series_dialog(self, book_id):
+        """
+        シリーズ追加ダイアログを表示する。
+
+        Parameters
+        ----------
+        book_id : int
+            追加する書籍のID
+        """
+        from PyQt6.QtWidgets import (
+            QComboBox,
+            QDialog,
+            QDialogButtonBox,
+            QFormLayout,
+            QLineEdit,
+            QPushButton,
+            QVBoxLayout,
+        )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add to Series")
+
+        layout = QVBoxLayout(dialog)
+        form_layout = QFormLayout()
+
+        # シリーズ選択
+        series_combo = QComboBox()
+        series_combo.addItem("-- Select Series --", None)
+
+        # シリーズの一覧を取得
+        series_list = self.library_controller.get_all_series()
+        for series in series_list:
+            series_combo.addItem(series.name, series.id)
+
+        form_layout.addRow("Series:", series_combo)
+
+        # 新しいシリーズの作成
+        new_series_layout = QHBoxLayout()
+        new_series_edit = QLineEdit()
+        new_series_edit.setPlaceholderText("Enter new series name")
+        new_series_layout.addWidget(new_series_edit)
+
+        create_button = QPushButton("Create")
+        new_series_layout.addWidget(create_button)
+
+        form_layout.addRow("New Series:", new_series_layout)
+
+        layout.addLayout(form_layout)
+
+        # ボタン
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # 「新しいシリーズ作成」ボタンが押されたときの処理
+        def create_new_series():
+            name = new_series_edit.text().strip()
+            if name:
+                series_id = self.library_controller.create_series(name=name)
+                if series_id:
+                    series_combo.addItem(name, series_id)
+                    index = series_combo.findData(series_id)
+                    if index >= 0:
+                        series_combo.setCurrentIndex(index)
+                    new_series_edit.clear()
+
+        create_button.clicked.connect(create_new_series)
+
+        # ダイアログを表示
+        if dialog.exec():
+            series_id = series_combo.currentData()
+            if series_id:
+                # 書籍をシリーズに追加
+                self.library_controller.update_book_metadata(
+                    book_id, series_id=series_id
+                )
+
+                # ビューを更新
+                self.grid_view.update_book_item(book_id)
+                self.list_view.update_book_item(book_id)
+                self.statusBar.showMessage("Book added to series")
+
+    def remove_book(self, book_id):
+        """
+        書籍を削除する。
+
+        Parameters
+        ----------
+        book_id : int
+            削除する書籍のID
+        """
+        from PyQt6.QtWidgets import QMessageBox
+
+        # 書籍情報を取得
+        book = self.library_controller.get_book(book_id)
+        if not book:
+            return
+
+        # 確認ダイアログを表示
+        result = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to remove '{book.title}' from the library?\n\n"
+            "This will only remove the book from the library, not delete the file.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if result == QMessageBox.StandardButton.Yes:
+            # 書籍を削除
+            success = self.library_controller.remove_book(book_id, delete_file=False)
+
+            if success:
+                # 現在開いている書籍がこれなら閉じる
+                if self.reader_view.current_book_id == book_id:
+                    self.reader_view.close_current_book()
+
+                # ライブラリを更新
+                self.refresh_library()
+                self.statusBar.showMessage(f"Book '{book.title}' removed from library")
 
     def show_settings_dialog(self):
         """設定ダイアログを表示する。"""

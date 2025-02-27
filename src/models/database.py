@@ -79,11 +79,13 @@ class DatabaseManager:
             file_path TEXT NOT NULL UNIQUE,
             series_id INTEGER,
             series_order INTEGER,
+            category_id INTEGER,
             author TEXT,
             publisher TEXT,
             cover_image BLOB,
             added_date TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (series_id) REFERENCES series (id)
+            FOREIGN KEY (series_id) REFERENCES series (id),
+            FOREIGN KEY (category_id) REFERENCES categories (id)
         )
         """)
 
@@ -516,6 +518,36 @@ class DatabaseManager:
         # 結果を自然順でソート
         return sorted(results, key=natural_sort_key)
 
+    def get_category(self, category_id):
+        """
+        指定したIDのカテゴリ情報を取得する。
+
+        Parameters
+        ----------
+        category_id : int
+            取得するカテゴリのID
+
+        Returns
+        -------
+        dict または None
+            カテゴリ情報の辞書、もしくは見つからない場合はNone
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT * FROM categories
+            WHERE id = ?
+            """,
+            (category_id,),
+        )
+
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+
     def get_all_categories(self):
         """
         すべてのカテゴリを取得する。
@@ -744,3 +776,91 @@ class DatabaseManager:
             if custom_updates
             else updated_count
         )
+
+    def get_books_by_category(self, category_id, **kwargs):
+        """
+        特定のカテゴリに関連する書籍を取得する。
+
+        (1) 直接そのカテゴリに属している書籍
+        (2) そのカテゴリに属するシリーズの書籍
+
+        Parameters
+        ----------
+        category_id : int
+            カテゴリID
+        **kwargs
+            その他の検索条件
+
+        Returns
+        -------
+        list
+            書籍情報の辞書のリスト
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        # 基本クエリ
+        sql = """
+        SELECT b.*, rp.status, rp.current_page, s.name as series_name, c.name as category_name
+        FROM books b
+        LEFT JOIN reading_progress rp ON b.id = rp.book_id
+        LEFT JOIN series s ON b.series_id = s.id
+        LEFT JOIN categories c ON (b.category_id = c.id OR s.category_id = c.id)
+        WHERE (b.category_id = ? OR s.category_id = ?)
+        """
+
+        params = [category_id, category_id]
+
+        # 追加の検索条件
+        for key, value in kwargs.items():
+            if key == "status" and value:
+                sql += " AND rp.status = ?"
+                params.append(value)
+
+        # タイトルでソート
+        sql += " ORDER BY b.title COLLATE NOCASE"
+
+        cursor.execute(sql, params)
+        results = [dict(row) for row in cursor.fetchall()]
+
+        # 自然順ソートを実装
+        import re
+
+        def natural_sort_key(item):
+            """
+            文字列内の数値を数値として扱うキー関数
+            """
+            title = item["title"] if item["title"] else ""
+            # 数値部分を抽出して数値として扱う
+            return [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
+            ]
+
+        # 結果を自然順でソート
+        return sorted(results, key=natural_sort_key)
+
+    def migrate_database(self):
+        """
+        データベーススキーマの移行を行う。
+        新しいバージョンのアプリケーションで必要なスキーマ変更を適用する。
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        try:
+            # books テーブルに category_id カラムが存在するか確認
+            cursor.execute("PRAGMA table_info(books)")
+            columns = [col[1] for col in cursor.fetchall()]
+
+            if "category_id" not in columns:
+                # category_id カラムを追加
+                cursor.execute("""
+                ALTER TABLE books ADD COLUMN category_id INTEGER 
+                REFERENCES categories(id)
+                """)
+                conn.commit()
+                print("Migrated: Added category_id column to books table")
+
+        except Exception as e:
+            print(f"Migration error: {e}")
+            conn.rollback()

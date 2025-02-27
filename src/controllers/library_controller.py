@@ -49,14 +49,19 @@ class LibraryController:
             Book オブジェクトのリスト
         """
         query_params = {}
-        if category_id:
-            query_params["category_id"] = category_id
         if status:
             query_params["status"] = status
 
         if series_id:
             # シリーズIDが指定されている場合は、そのシリーズの書籍のみを取得
             book_data_list = self.db_manager.get_books_in_series(series_id)
+        elif category_id:
+            # カテゴリIDが指定されている場合
+            # 1. そのカテゴリに直接属する書籍を取得
+            # 2. そのカテゴリに属するシリーズの書籍を取得
+            book_data_list = self.db_manager.get_books_by_category(
+                category_id, **query_params
+            )
         else:
             # それ以外は検索条件に基づいて取得
             book_data_list = self.db_manager.search_books(**query_params)

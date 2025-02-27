@@ -238,15 +238,19 @@ class CategoryManager(QDialog):
 
         category_id = current_item.data(Qt.ItemDataRole.UserRole)
 
-        # 削除前に確認
+        # カテゴリに所属する書籍とシリーズの数を取得
         series_count = self._get_series_count(category_id)
-        if series_count > 0:
+        book_count = self._get_book_count(category_id)
+
+        if series_count > 0 or book_count > 0:
+            message = f"This category is associated with {series_count} series and {book_count} individual books. "
+            message += "If deleted, these items will no longer be associated with any category. "
+            message += "Do you want to continue?"
+
             result = QMessageBox.question(
                 self,
                 "Confirm Delete",
-                f"This category contains {series_count} series. "
-                "If deleted, these series will no longer be associated with any category. "
-                "Do you want to continue?",
+                message,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -270,3 +274,30 @@ class CategoryManager(QDialog):
             QMessageBox.information(self, "Success", "Category deleted successfully.")
         else:
             QMessageBox.critical(self, "Error", "Failed to delete category.")
+
+    def _get_book_count(self, category_id):
+        """
+        カテゴリに直接属する書籍の数を取得する。
+
+        Parameters
+        ----------
+        category_id : int
+            カテゴリID
+
+        Returns
+        -------
+        int
+            書籍の数
+        """
+        conn = self.library_controller.db_manager.connect()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM books
+            WHERE category_id = ?
+            """,
+            (category_id,),
+        )
+
+        return cursor.fetchone()[0]

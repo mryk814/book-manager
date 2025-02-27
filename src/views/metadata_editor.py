@@ -606,6 +606,23 @@ class MetadataEditor(QDialog):
         self.publisher_edit = QLineEdit(self.book.publisher or "")
         info_layout.addRow("Publisher:", self.publisher_edit)
 
+        # カテゴリ
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("-- None --", None)
+
+        # カテゴリの一覧を取得
+        categories = self.library_controller.get_all_categories()
+        for category in categories:
+            self.category_combo.addItem(category["name"], category["id"])
+
+        # 現在のカテゴリを選択
+        if book.category_id:
+            index = self.category_combo.findData(book.category_id)
+            if index >= 0:
+                self.category_combo.setCurrentIndex(index)
+
+        info_layout.addRow("Category:", self.category_combo)
+
         # ファイルパス（読み取り専用）
         self.path_edit = QLineEdit(self.book.file_path)
         self.path_edit.setReadOnly(True)
@@ -881,3 +898,7 @@ class MetadataEditor(QDialog):
 
         # 読書状態を更新
         self.library_controller.update_book_progress(self.book_id, status=status)
+
+        # カテゴリ情報を取得
+        category_id = self.category_combo.currentData()
+        metadata_updates["category_id"] = category_id

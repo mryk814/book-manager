@@ -102,6 +102,19 @@ class Book:
             self._custom_metadata = self.db_manager.get_custom_metadata(book_id=self.id)
         return self._custom_metadata
 
+    @property
+    def category_id(self):
+        """書籍のカテゴリID"""
+        return self.data.get("category_id")
+
+    @property
+    def category_name(self):
+        """書籍のカテゴリ名"""
+        if self.category_id:
+            category = self.db_manager.get_category(self.category_id)
+            return category["name"] if category else None
+        return None
+
     def exists(self):
         """
         PDFファイルが存在するか確認する。

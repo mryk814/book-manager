@@ -91,7 +91,22 @@ class BookListItemWidget(QWidget):
                     series_text += f" #{book.series_order}"
                 self.series_label = QLabel(series_text)
                 info_layout.addWidget(self.series_label)
-
+        # シリーズ情報の後にカテゴリ情報を追加
+        if book.category_id:
+            self.category_label = QLabel(f"Category: {book.category_name}")
+            info_layout.addWidget(self.category_label)
+        elif book.series_id and book.db_manager.get_series(book.series_id).get(
+            "category_id"
+        ):
+            # シリーズのカテゴリを表示
+            series = book.db_manager.get_series(book.series_id)
+            if series and series.get("category_id"):
+                category = book.db_manager.get_category(series.get("category_id"))
+                if category:
+                    self.category_label = QLabel(
+                        f"Category: {category['name']} (from series)"
+                    )
+                    info_layout.addWidget(self.category_label)
         # 読書状態
         status_text = "Unread"
         if book.status == Book.STATUS_READING:
@@ -243,6 +258,23 @@ class BookGridItemWidget(QWidget):
             self.author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.author_label.setToolTip(book.author)
             layout.addWidget(self.author_label)
+
+        # シリーズ情報の後にカテゴリ情報を追加
+        if book.category_id:
+            self.category_label = QLabel(f"Category: {book.category_name}")
+            layout.addWidget(self.category_label)
+        elif book.series_id and book.db_manager.get_series(book.series_id).get(
+            "category_id"
+        ):
+            # シリーズのカテゴリを表示
+            series = book.db_manager.get_series(book.series_id)
+            if series and series.get("category_id"):
+                category = book.db_manager.get_category(series.get("category_id"))
+                if category:
+                    self.category_label = QLabel(
+                        f"Category: {category['name']} (from series)"
+                    )
+                    layout.addWidget(self.category_label)
 
         # 読書状態（アイコンまたはテキスト）
         status_text = "Unread"

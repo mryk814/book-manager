@@ -7,6 +7,7 @@ from pathlib import Path
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
+from models.database import DatabaseManager
 from views.main_window import MainWindow
 
 
@@ -144,6 +145,11 @@ def main():
     db_dir = os.path.dirname(db_path)
     if db_dir:  # ディレクトリパスが空でない場合のみ作成
         os.makedirs(db_dir, exist_ok=True)
+
+    # データベースマイグレーションを実行
+    db_manager = DatabaseManager(db_path)
+    db_manager.migrate_database()
+    db_manager.close()
 
     # メインウィンドウを作成
     window = MainWindow(db_path)

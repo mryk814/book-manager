@@ -396,6 +396,24 @@ class MainWindow(QMainWindow):
         books_layout.setContentsMargins(0, 0, 0, 0)
         self.main_tabs.addTab(self.books_tab, "Books")
 
+        # シリーズナビゲーションバー（書籍タブの上部に配置）
+        self.series_navigation = QWidget()
+        series_navigation_layout = QHBoxLayout(self.series_navigation)
+        series_navigation_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.back_to_series_button = QPushButton("← Back to Series")
+        self.back_to_series_button.clicked.connect(self.show_series_view)
+        self.back_to_series_button.setVisible(False)  # 初期状態では非表示
+        series_navigation_layout.addWidget(self.back_to_series_button)
+
+        self.current_series_label = QLabel("")
+        self.current_series_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        series_navigation_layout.addWidget(self.current_series_label)
+
+        series_navigation_layout.addStretch(1)
+
+        books_layout.addWidget(self.series_navigation)
+
         # 書籍ビュータイプのタブウィジェット
         self.library_tabs = QTabWidget()
         books_layout.addWidget(self.library_tabs)
@@ -426,24 +444,6 @@ class MainWindow(QMainWindow):
         self.series_list_view = SeriesListView(self.library_controller)
         self.series_tabs.addTab(self.series_list_view, "List View")
 
-        # シリーズビューのナビゲーションバー
-        self.series_navigation = QWidget()
-        series_navigation_layout = QHBoxLayout(self.series_navigation)
-        series_navigation_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.back_to_series_button = QPushButton("← Back to Series")
-        self.back_to_series_button.clicked.connect(self.show_series_view)
-        self.back_to_series_button.setVisible(False)  # 初期状態では非表示
-        series_navigation_layout.addWidget(self.back_to_series_button)
-
-        self.current_series_label = QLabel("")
-        self.current_series_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        series_navigation_layout.addWidget(self.current_series_label)
-
-        series_navigation_layout.addStretch(1)
-
-        series_layout.insertWidget(0, self.series_navigation)
-
         # タブの変更をツールバーコンボボックスと同期
         self.library_tabs.currentChanged.connect(
             lambda idx: self.view_type_combo.setCurrentIndex(idx)
@@ -460,6 +460,9 @@ class MainWindow(QMainWindow):
 
         # 現在表示中のシリーズID
         self.current_series_id = None
+
+        # データキャッシュ（パフォーマンス向上用）
+        self.series_books_cache = {}
 
     def setup_reader_panel(self):
         """リーダーパネルを設定する。"""
@@ -529,14 +532,17 @@ class MainWindow(QMainWindow):
         current_main_tab = self.main_tabs.currentWidget()
 
         if current_main_tab == self.books_tab:
-            # 書籍タブがアクティブな場合
             self.library_tabs.setCurrentIndex(index)
 
             # メニューの選択状態も更新
             self.grid_view_action.setChecked(index == 0)
             self.list_view_action.setChecked(index == 1)
+
+            # シリーズを表示中なら、ビュー切替時にシリーズフィルタを再適用
+            if self.current_series_id and self.back_to_series_button.isVisible():
+                self.filter_by_series(self.current_series_id)
+
         elif current_main_tab == self.series_tab:
-            # シリーズタブがアクティブな場合
             self.series_tabs.setCurrentIndex(index)
 
     def filter_by_category(self, index):
@@ -827,6 +833,9 @@ class MainWindow(QMainWindow):
 
     def refresh_library(self):
         """ライブラリビューをリフレッシュする。"""
+        # キャッシュをクリア
+        self.series_books_cache = {}
+
         # 現在表示中のシリーズがある場合は、そのシリーズの書籍のみをリフレッシュ
         if self.current_series_id and self.back_to_series_button.isVisible():
             self.filter_by_series(self.current_series_id)
@@ -1459,6 +1468,12 @@ class MainWindow(QMainWindow):
         # 現在のシリーズIDを保存
         self.current_series_id = series_id
 
+        # シリーズの書籍をキャッシュに保存
+        if series_id not in self.series_books_cache:
+            # シリーズに属する書籍を先に取得してキャッシュに保存
+            books = self.library_controller.get_all_books(series_id=series_id)
+            self.series_books_cache[series_id] = books
+
         # シリーズのビューを書籍に切り替え
         self.show_series_books(series)
 
@@ -1478,15 +1493,7 @@ class MainWindow(QMainWindow):
         self.back_to_series_button.setVisible(True)
         self.current_series_label.setText(f"Series: {series.name}")
 
-        # シリーズに属する書籍だけをフィルタリング表示
-        self.grid_view.set_category_filter(None)  # カテゴリフィルタをクリア
-        self.list_view.set_category_filter(None)
-
-        # シリーズ内の書籍のみを表示
-        self.grid_view.refresh()  # 一度全てリフレッシュしてから
-        self.list_view.refresh()
-
-        # シリーズIDでフィルタリング
+        # パフォーマンス改善: フィルタリングを最適化
         self.filter_by_series(series.id)
 
         # 書籍タブに切り替え
@@ -1513,8 +1520,13 @@ class MainWindow(QMainWindow):
         series_id : int
             フィルタリングするシリーズID
         """
-        # 書籍リストをシリーズでフィルタリング
-        books = self.library_controller.get_all_books(series_id=series_id)
+        # キャッシュから書籍リストを取得（パフォーマンス改善）
+        if series_id in self.series_books_cache:
+            books = self.series_books_cache[series_id]
+        else:
+            # キャッシュにない場合は取得してキャッシュに保存
+            books = self.library_controller.get_all_books(series_id=series_id)
+            self.series_books_cache[series_id] = books
 
         # 現在のビューに応じてリストを更新
         current_view = self.library_tabs.currentWidget()
@@ -1533,6 +1545,9 @@ class MainWindow(QMainWindow):
         """シリーズフィルタをクリアする。"""
         self.grid_view.refresh()
         self.list_view.refresh()
+
+        # キャッシュをクリア
+        self.current_series_id = None
 
     def update_series_view_state(self):
         """シリーズビュー状態を更新する。"""
@@ -1635,6 +1650,10 @@ class MainWindow(QMainWindow):
             cursor.execute("DELETE FROM series WHERE id = ?", (series_id,))
 
             conn.commit()
+
+            # キャッシュからも削除
+            if series_id in self.series_books_cache:
+                del self.series_books_cache[series_id]
 
             # シリーズビューを更新
             self.series_grid_view.refresh()

@@ -36,6 +36,8 @@ from views.dialogs.settings_dialog import SettingsDialog
 from views.library_view import LibraryGridView, LibraryListView
 from views.metadata_editor import MetadataEditor
 from views.reader_view import PDFReaderView
+from views.series_editor import SeriesEditor
+from views.series_view import SeriesGridView, SeriesListView
 
 
 class MainWindow(QMainWindow):
@@ -384,9 +386,19 @@ class MainWindow(QMainWindow):
 
     def setup_library_panel(self):
         """ライブラリパネルを設定する。"""
-        # タブウィジェットを作成
+        # メインタブウィジェット（書籍とシリーズ）
+        self.main_tabs = QTabWidget()
+        self.library_layout.addWidget(self.main_tabs)
+
+        # 書籍タブ
+        self.books_tab = QWidget()
+        books_layout = QVBoxLayout(self.books_tab)
+        books_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_tabs.addTab(self.books_tab, "Books")
+
+        # 書籍ビュータイプのタブウィジェット
         self.library_tabs = QTabWidget()
-        self.library_layout.addWidget(self.library_tabs)
+        books_layout.addWidget(self.library_tabs)
 
         # グリッドビュータブ
         self.grid_view = LibraryGridView(self.library_controller)
@@ -396,10 +408,58 @@ class MainWindow(QMainWindow):
         self.list_view = LibraryListView(self.library_controller)
         self.library_tabs.addTab(self.list_view, "List View")
 
+        # シリーズタブ
+        self.series_tab = QWidget()
+        series_layout = QVBoxLayout(self.series_tab)
+        series_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_tabs.addTab(self.series_tab, "Series")
+
+        # シリーズビュータイプのタブウィジェット
+        self.series_tabs = QTabWidget()
+        series_layout.addWidget(self.series_tabs)
+
+        # シリーズグリッドビュー
+        self.series_grid_view = SeriesGridView(self.library_controller)
+        self.series_tabs.addTab(self.series_grid_view, "Grid View")
+
+        # シリーズリストビュー
+        self.series_list_view = SeriesListView(self.library_controller)
+        self.series_tabs.addTab(self.series_list_view, "List View")
+
+        # シリーズビューのナビゲーションバー
+        self.series_navigation = QWidget()
+        series_navigation_layout = QHBoxLayout(self.series_navigation)
+        series_navigation_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.back_to_series_button = QPushButton("← Back to Series")
+        self.back_to_series_button.clicked.connect(self.show_series_view)
+        self.back_to_series_button.setVisible(False)  # 初期状態では非表示
+        series_navigation_layout.addWidget(self.back_to_series_button)
+
+        self.current_series_label = QLabel("")
+        self.current_series_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        series_navigation_layout.addWidget(self.current_series_label)
+
+        series_navigation_layout.addStretch(1)
+
+        series_layout.insertWidget(0, self.series_navigation)
+
         # タブの変更をツールバーコンボボックスと同期
         self.library_tabs.currentChanged.connect(
             lambda idx: self.view_type_combo.setCurrentIndex(idx)
         )
+
+        # シリーズタブの変更を処理
+        self.series_tabs.currentChanged.connect(
+            lambda idx: self.update_series_view_state()
+        )
+
+        # シリーズ選択シグナルを接続
+        self.series_grid_view.series_selected.connect(self.on_series_selected)
+        self.series_list_view.series_selected.connect(self.on_series_selected)
+
+        # 現在表示中のシリーズID
+        self.current_series_id = None
 
     def setup_reader_panel(self):
         """リーダーパネルを設定する。"""
@@ -426,6 +486,13 @@ class MainWindow(QMainWindow):
         self.list_view._batch_remove_from_series = self.batch_remove_from_series
         self.list_view._remove_book = self.remove_book
         self.list_view._batch_remove_books = self.batch_remove_books
+
+        # シリーズビューのコンテキストメニューハンドラ
+        self.series_grid_view._edit_series = self.show_series_editor
+        self.series_grid_view._remove_series = self.remove_series
+
+        self.series_list_view._edit_series = self.show_series_editor
+        self.series_list_view._remove_series = self.remove_series
 
     def setup_connections(self):
         """シグナルとスロットを接続する。"""
@@ -458,11 +525,19 @@ class MainWindow(QMainWindow):
         index : int
             コンボボックスのインデックス（0=グリッド, 1=リスト）
         """
-        self.library_tabs.setCurrentIndex(index)
+        # 現在アクティブなメインタブを取得
+        current_main_tab = self.main_tabs.currentWidget()
 
-        # メニューの選択状態も更新
-        self.grid_view_action.setChecked(index == 0)
-        self.list_view_action.setChecked(index == 1)
+        if current_main_tab == self.books_tab:
+            # 書籍タブがアクティブな場合
+            self.library_tabs.setCurrentIndex(index)
+
+            # メニューの選択状態も更新
+            self.grid_view_action.setChecked(index == 0)
+            self.list_view_action.setChecked(index == 1)
+        elif current_main_tab == self.series_tab:
+            # シリーズタブがアクティブな場合
+            self.series_tabs.setCurrentIndex(index)
 
     def filter_by_category(self, index):
         """
@@ -584,6 +659,13 @@ class MainWindow(QMainWindow):
                 # ビューを更新
                 self.grid_view.update_book_item(book_id)
                 self.list_view.update_book_item(book_id)
+
+                # シリーズビューも更新
+                book = self.library_controller.get_book(book_id)
+                if book and book.series_id:
+                    self.series_grid_view.update_series_item(book.series_id)
+                    self.series_list_view.update_series_item(book.series_id)
+
                 self.statusBar.showMessage("Metadata updated successfully")
 
     def show_add_to_series_dialog(self, book_id):
@@ -745,9 +827,21 @@ class MainWindow(QMainWindow):
 
     def refresh_library(self):
         """ライブラリビューをリフレッシュする。"""
-        self.grid_view.refresh()
-        self.list_view.refresh()
+        # 現在表示中のシリーズがある場合は、そのシリーズの書籍のみをリフレッシュ
+        if self.current_series_id and self.back_to_series_button.isVisible():
+            self.filter_by_series(self.current_series_id)
+        else:
+            # 通常のリフレッシュ
+            self.grid_view.refresh()
+            self.list_view.refresh()
+
+        # シリーズビューもリフレッシュ
+        self.series_grid_view.refresh()
+        self.series_list_view.refresh()
+
+        # カテゴリコンボボックスを更新
         self.populate_category_combo()
+
         self.statusBar.showMessage("Library refreshed")
 
     def closeEvent(self, event):
@@ -1346,3 +1440,212 @@ class MainWindow(QMainWindow):
 
         # 複数選択関連のUIを更新
         self.update_batch_actions_state()
+
+    def on_series_selected(self, series_id):
+        """
+        シリーズが選択されたときの処理。
+
+        Parameters
+        ----------
+        series_id : int
+            選択されたシリーズのID
+        """
+        # シリーズを取得
+        series = self.library_controller.get_series(series_id)
+        if not series:
+            self.statusBar.showMessage("Series not found")
+            return
+
+        # 現在のシリーズIDを保存
+        self.current_series_id = series_id
+
+        # シリーズのビューを書籍に切り替え
+        self.show_series_books(series)
+
+        # スタータスバーにメッセージを表示
+        self.statusBar.showMessage(f"Series: {series.name} ({len(series.books)} books)")
+
+    def show_series_books(self, series):
+        """
+        シリーズに属する書籍を表示する。
+
+        Parameters
+        ----------
+        series : Series
+            表示するシリーズオブジェクト
+        """
+        # ナビゲーションバーを更新
+        self.back_to_series_button.setVisible(True)
+        self.current_series_label.setText(f"Series: {series.name}")
+
+        # シリーズに属する書籍だけをフィルタリング表示
+        self.grid_view.set_category_filter(None)  # カテゴリフィルタをクリア
+        self.list_view.set_category_filter(None)
+
+        # シリーズ内の書籍のみを表示
+        self.grid_view.refresh()  # 一度全てリフレッシュしてから
+        self.list_view.refresh()
+
+        # シリーズIDでフィルタリング
+        self.filter_by_series(series.id)
+
+        # 書籍タブに切り替え
+        self.main_tabs.setCurrentWidget(self.books_tab)
+
+    def show_series_view(self):
+        """シリーズビューに戻る。"""
+        # ナビゲーションバーを更新
+        self.back_to_series_button.setVisible(False)
+        self.current_series_label.setText("")
+
+        # フィルタをクリア
+        self.clear_series_filter()
+
+        # シリーズタブに切り替え
+        self.main_tabs.setCurrentWidget(self.series_tab)
+
+    def filter_by_series(self, series_id):
+        """
+        シリーズでフィルタリングする。
+
+        Parameters
+        ----------
+        series_id : int
+            フィルタリングするシリーズID
+        """
+        # 書籍リストをシリーズでフィルタリング
+        books = self.library_controller.get_all_books(series_id=series_id)
+
+        # 現在のビューに応じてリストを更新
+        current_view = self.library_tabs.currentWidget()
+        if current_view == self.grid_view:
+            # グリッドビューの表示をクリア
+            self.grid_view._clear_grid()
+            # シリーズに属する書籍を表示
+            self.grid_view._populate_grid(books)
+        else:
+            # リストビューの表示をクリア
+            self.list_view.list_widget.clear()
+            # シリーズに属する書籍を表示
+            self.list_view._populate_list(books)
+
+    def clear_series_filter(self):
+        """シリーズフィルタをクリアする。"""
+        self.grid_view.refresh()
+        self.list_view.refresh()
+
+    def update_series_view_state(self):
+        """シリーズビュー状態を更新する。"""
+        # 現在のシリーズビュータイプを取得
+        current_series_view = self.series_tabs.currentWidget()
+
+        # ビューの選択状態を同期
+        if current_series_view == self.series_grid_view:
+            # グリッドビューが選択されている場合
+            self.grid_view_action.setChecked(True)
+            self.list_view_action.setChecked(False)
+        else:
+            # リストビューが選択されている場合
+            self.grid_view_action.setChecked(False)
+            self.list_view_action.setChecked(True)
+
+    def show_series_editor(self, series_id=None):
+        """
+        シリーズ編集ダイアログを表示する。
+
+        Parameters
+        ----------
+        series_id : int, optional
+            編集するシリーズのID。指定されない場合は現在選択されているシリーズを使用。
+        """
+        # シリーズIDが指定されていない場合は現在選択されているシリーズを使用
+        if series_id is None:
+            series_id = (
+                self.series_grid_view.get_selected_series_id()
+                or self.series_list_view.get_selected_series_id()
+            )
+
+        if series_id:
+            try:
+                from views.series_editor import SeriesEditor
+
+                dialog = SeriesEditor(self.library_controller, series_id, self)
+                if dialog.exec():
+                    # シリーズビューを更新
+                    self.series_grid_view.update_series_item(series_id)
+                    self.series_list_view.update_series_item(series_id)
+
+                    # 書籍ビューも更新
+                    self.refresh_library()
+
+                    self.statusBar.showMessage("Series updated successfully")
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "Error", f"Failed to open series editor: {e}"
+                )
+
+    def remove_series(self, series_id):
+        """
+        シリーズを削除する。
+
+        Parameters
+        ----------
+        series_id : int
+            削除するシリーズID
+        """
+        # シリーズを取得
+        series = self.library_controller.get_series(series_id)
+        if not series:
+            return
+
+        # 確認ダイアログを表示
+        books_count = len(series.books)
+        message = f"Are you sure you want to remove the series '{series.name}'?"
+
+        if books_count > 0:
+            message += f"\n\nThis series contains {books_count} books. "
+            message += "The books will remain in your library but will no longer be associated with this series."
+
+        result = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        # シリーズ内の全書籍のシリーズIDをNULLに設定
+        for book in series.books:
+            book.update_metadata(series_id=None, series_order=None)
+
+        # シリーズを削除
+        conn = self.db_manager.connect()
+        cursor = conn.cursor()
+
+        try:
+            # カスタムメタデータを削除
+            cursor.execute(
+                "DELETE FROM custom_metadata WHERE series_id = ?", (series_id,)
+            )
+
+            # シリーズを削除
+            cursor.execute("DELETE FROM series WHERE id = ?", (series_id,))
+
+            conn.commit()
+
+            # シリーズビューを更新
+            self.series_grid_view.refresh()
+            self.series_list_view.refresh()
+
+            # 現在表示中のシリーズなら元に戻す
+            if self.current_series_id == series_id:
+                self.show_series_view()
+
+            self.statusBar.showMessage(f"Series '{series.name}' removed")
+
+        except Exception as e:
+            conn.rollback()
+            QMessageBox.critical(self, "Error", f"Failed to remove series: {e}")

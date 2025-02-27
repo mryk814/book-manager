@@ -242,6 +242,9 @@ class MainWindow(QMainWindow):
         self.populate_category_combo()
         self.category_combo.currentIndexChanged.connect(self.filter_by_category)
         self.toolbar.addWidget(self.category_combo)
+        self.clear_category_filter_button = QPushButton("Clear")
+        self.clear_category_filter_button.clicked.connect(self.clear_category_filter)
+        self.toolbar.addWidget(self.clear_category_filter_button)
 
         self.toolbar.addSeparator()
 
@@ -292,6 +295,14 @@ class MainWindow(QMainWindow):
         edit_metadata_action.triggered.connect(self.show_metadata_editor)
         edit_menu.addAction(edit_metadata_action)
         self.edit_metadata_action = edit_metadata_action
+
+        # 編集メニューに追加（edit_menuが定義されている部分の後に追加）
+        edit_menu.addSeparator()
+
+        # カテゴリ管理
+        manage_categories_action = QAction("Manage &Categories...", self)
+        manage_categories_action.triggered.connect(self.show_category_manager)
+        edit_menu.addAction(manage_categories_action)
 
         # 複数選択モード切り替え
         multi_select_menu_action = QAction("&Multi-Select Mode", self)
@@ -585,8 +596,16 @@ class MainWindow(QMainWindow):
             コンボボックスのインデックス
         """
         category_id = self.category_combo.itemData(index)
+
         self.grid_view.set_category_filter(category_id)
         self.list_view.set_category_filter(category_id)
+
+        # シリーズビューにもフィルタを適用
+        self.series_grid_view.set_category_filter(category_id)
+        self.series_list_view.set_category_filter(category_id)
+
+        # ステータスバーにメッセージを表示
+        self.update_category_filter_status()
 
     def search_books(self):
         """検索ボックスの内容で書籍を検索する。"""
@@ -595,6 +614,10 @@ class MainWindow(QMainWindow):
             self.grid_view.search(query)
             self.list_view.search(query)
             self.statusBar.showMessage(f"Search results for: {query}")
+
+    def clear_category_filter(self):
+        """カテゴリフィルタをクリアする。"""
+        self.category_combo.setCurrentIndex(0)  # 「All Categories」を選択
 
     def clear_search(self):
         """検索をクリアし、すべての書籍を表示する。"""
@@ -1823,3 +1846,29 @@ class MainWindow(QMainWindow):
 
         # 完了メッセージを表示
         self.statusBar.showMessage("Series view loaded")
+
+    def show_category_manager(self):
+        """カテゴリ管理ダイアログを表示する。"""
+        try:
+            from views.dialogs.category_manager import CategoryManager
+
+            dialog = CategoryManager(self.library_controller, self)
+            dialog.exec()
+
+            # カテゴリが変更された場合、カテゴリコンボボックスを更新
+            self.populate_category_combo()
+
+            # カテゴリフィルタ情報をステータスバーに更新
+            self.update_category_filter_status()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open category manager: {e}")
+
+    def update_category_filter_status(self):
+        """カテゴリフィルタの状態をステータスバーに表示する。"""
+        category_id = self.category_combo.currentData()
+        category_name = self.category_combo.currentText()
+
+        if category_id is None:
+            self.statusBar.showMessage("Showing all categories")
+        else:
+            self.statusBar.showMessage(f"Filtered by category: {category_name}")

@@ -554,3 +554,115 @@ class LibraryController:
                 failed_ids.append(book_id)
 
         return {"success": success_ids, "failed": failed_ids}
+
+    def get_category(self, category_id):
+        """
+        指定したIDのカテゴリ情報を取得する。
+
+        Parameters
+        ----------
+        category_id : int
+            取得するカテゴリのID
+
+        Returns
+        -------
+        dict または None
+            カテゴリ情報の辞書、もしくは見つからない場合はNone
+        """
+        conn = self.db_manager.connect()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT * FROM categories
+            WHERE id = ?
+            """,
+            (category_id,),
+        )
+
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+
+    def update_category(self, category_id, name, description=None):
+        """
+        カテゴリを更新する。
+
+        Parameters
+        ----------
+        category_id : int
+            更新するカテゴリのID
+        name : str
+            カテゴリ名
+        description : str, optional
+            カテゴリの説明
+
+        Returns
+        -------
+        bool
+            更新が成功したかどうか
+        """
+        conn = self.db_manager.connect()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                """
+                UPDATE categories
+                SET name = ?, description = ?
+                WHERE id = ?
+                """,
+                (name, description, category_id),
+            )
+
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating category: {e}")
+            conn.rollback()
+            return False
+
+    def delete_category(self, category_id):
+        """
+        カテゴリを削除する。
+
+        Parameters
+        ----------
+        category_id : int
+            削除するカテゴリのID
+
+        Returns
+        -------
+        bool
+            削除が成功したかどうか
+        """
+        conn = self.db_manager.connect()
+        cursor = conn.cursor()
+
+        try:
+            # カテゴリに所属するシリーズのカテゴリIDをNULLに設定
+            cursor.execute(
+                """
+                UPDATE series
+                SET category_id = NULL
+                WHERE category_id = ?
+                """,
+                (category_id,),
+            )
+
+            # カテゴリを削除
+            cursor.execute(
+                """
+                DELETE FROM categories
+                WHERE id = ?
+                """,
+                (category_id,),
+            )
+
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error deleting category: {e}")
+            conn.rollback()
+            return False

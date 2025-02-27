@@ -239,6 +239,17 @@ class BatchMetadataEditor(QDialog):
 
         series_layout.addRow("New Series:", new_series_layout)
 
+        # カテゴリ選択
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("-- No Change --", None)
+
+        # カテゴリの一覧を取得
+        categories = self.library_controller.get_all_categories()
+        for category in categories:
+            self.category_combo.addItem(category["name"], category["id"])
+
+        series_layout.addRow("Category:", self.category_combo)
+
         # シリーズ内の順番設定
         self.order_method_combo = QComboBox()
         self.order_method_combo.addItem("Do not change order", "no_change")
@@ -441,45 +452,34 @@ class BatchMetadataEditor(QDialog):
             else:
                 metadata_updates["series_id"] = series_id
 
+                # ここから: カテゴリの更新処理を追加
+                category_id = self.category_combo.currentData()
+                if category_id is not None:  # カテゴリが選択された場合のみ
+                    # シリーズのカテゴリを更新
+                    series = self.library_controller.get_series(series_id)
+                    if series:
+                        series.update_metadata(category_id=category_id)
+                # ここまで: 追加コード
+
                 # シリーズの順番処理
                 order_method = self.order_method_combo.currentData()
                 if order_method == "sequential" or order_method == "specific":
                     start_order = self.start_order_spin.value()
                     preserve_current = self.preserve_current_check.isChecked()
 
-                    # 自然順ソートを実装（数値を考慮したソート）
-                    import re
-
-                    def natural_sort_key(book):
-                        """
-                        series_orderを最優先し、次にタイトルの自然順でソート
-                        """
-                        # series_orderがNoneの場合は最大値とする（最後に表示）
-                        order = (
-                            book.series_order
-                            if book.series_order is not None
-                            else float("inf")
-                        )
-                        title = book.title if book.title else ""
-                        # 数値部分を抽出して数値として扱う
-                        title_key = [
-                            int(c) if c.isdigit() else c.lower()
-                            for c in re.split(r"(\d+)", title)
-                        ]
-                        return (order, title_key)
-
+                    # 本のリストをソート
                     if preserve_current:
                         # 現在の順番を維持しつつソート
                         sorted_books = sorted(
                             self.books,
                             key=lambda b: (
                                 b.series_id != series_id,
-                                natural_sort_key(b),
+                                b.series_order or float("inf"),
                             ),
                         )
                     else:
-                        # タイトルでソート（自然順）
-                        sorted_books = sorted(self.books, key=natural_sort_key)
+                        # タイトルでソート
+                        sorted_books = sorted(self.books, key=lambda b: b.title)
 
                     # 各本に順番を割り当て
                     current_order = start_order

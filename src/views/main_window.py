@@ -4,8 +4,12 @@ import sys
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -14,6 +18,7 @@ from PyQt6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -23,7 +28,9 @@ from PyQt6.QtWidgets import (
 )
 
 from controllers.library_controller import LibraryController
+from models.book import Book
 from models.database import DatabaseManager
+from views.batch_metadata_editor import BatchMetadataEditor
 from views.dialogs.import_dialog import ImportDialog
 from views.dialogs.settings_dialog import SettingsDialog
 from views.library_view import LibraryGridView, LibraryListView
@@ -114,6 +121,79 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addSeparator()
 
+        # 複数選択モードの切り替え
+        self.multi_select_action = QAction("Multi-Select", self)
+        self.multi_select_action.setCheckable(True)
+        self.multi_select_action.setStatusTip("Enable multiple selection")
+        self.multi_select_action.triggered.connect(self.toggle_multi_select_mode)
+        self.toolbar.addAction(self.multi_select_action)
+
+        # 全選択ボタン
+        self.select_all_action = QAction("Select All", self)
+        self.select_all_action.setStatusTip("Select all visible books")
+        self.select_all_action.triggered.connect(self.select_all_books)
+        self.select_all_action.setEnabled(False)  # 初期状態では無効
+        self.toolbar.addAction(self.select_all_action)
+
+        # 一括操作のドロップダウンボタン
+        self.batch_actions_button = QPushButton("Batch Actions")
+        self.batch_actions_button.setEnabled(False)  # 初期状態では無効
+
+        # 一括操作メニューの作成
+        self.batch_actions_menu = QMenu(self)
+
+        self.batch_edit_action = QAction("Edit Selected Books", self)
+        self.batch_edit_action.triggered.connect(self.show_batch_metadata_editor)
+        self.batch_actions_menu.addAction(self.batch_edit_action)
+
+        self.batch_add_to_series_action = QAction("Add to Series", self)
+        self.batch_add_to_series_action.triggered.connect(
+            self.show_batch_add_to_series_dialog
+        )
+        self.batch_actions_menu.addAction(self.batch_add_to_series_action)
+
+        self.batch_remove_from_series_action = QAction("Remove from Series", self)
+        self.batch_remove_from_series_action.triggered.connect(
+            self.batch_remove_from_series
+        )
+        self.batch_actions_menu.addAction(self.batch_remove_from_series_action)
+
+        self.batch_actions_menu.addSeparator()
+
+        # 一括ステータス変更サブメニュー
+        self.batch_status_menu = QMenu("Mark as", self)
+
+        self.batch_mark_unread_action = QAction("Unread", self)
+        self.batch_mark_unread_action.triggered.connect(
+            lambda: self.batch_mark_as_status(Book.STATUS_UNREAD)
+        )
+        self.batch_status_menu.addAction(self.batch_mark_unread_action)
+
+        self.batch_mark_reading_action = QAction("Reading", self)
+        self.batch_mark_reading_action.triggered.connect(
+            lambda: self.batch_mark_as_status(Book.STATUS_READING)
+        )
+        self.batch_status_menu.addAction(self.batch_mark_reading_action)
+
+        self.batch_mark_completed_action = QAction("Completed", self)
+        self.batch_mark_completed_action.triggered.connect(
+            lambda: self.batch_mark_as_status(Book.STATUS_COMPLETED)
+        )
+        self.batch_status_menu.addAction(self.batch_mark_completed_action)
+
+        self.batch_actions_menu.addMenu(self.batch_status_menu)
+
+        self.batch_actions_menu.addSeparator()
+
+        self.batch_remove_action = QAction("Remove Selected Books", self)
+        self.batch_remove_action.triggered.connect(self.batch_remove_books)
+        self.batch_actions_menu.addAction(self.batch_remove_action)
+
+        self.batch_actions_button.setMenu(self.batch_actions_menu)
+        self.toolbar.addWidget(self.batch_actions_button)
+
+        self.toolbar.addSeparator()
+
         # ビュータイプの切り替え
         self.view_label = QLabel("View:")
         self.toolbar.addWidget(self.view_label)
@@ -185,6 +265,89 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(edit_metadata_action)
         self.edit_metadata_action = edit_metadata_action
 
+        # 複数選択モード切り替え
+        multi_select_menu_action = QAction("&Multi-Select Mode", self)
+        multi_select_menu_action.setCheckable(True)
+        multi_select_menu_action.triggered.connect(self.toggle_multi_select_mode)
+        edit_menu.addAction(multi_select_menu_action)
+        self.multi_select_menu_action = multi_select_menu_action
+
+        # 選択全選択
+        select_all_menu_action = QAction("Select &All", self)
+        select_all_menu_action.setShortcut(QKeySequence("Ctrl+A"))
+        select_all_menu_action.triggered.connect(self.select_all_books)
+        select_all_menu_action.setEnabled(False)  # 初期状態では無効
+        edit_menu.addAction(select_all_menu_action)
+        self.select_all_menu_action = select_all_menu_action
+
+        edit_menu.addSeparator()
+
+        # 一括編集サブメニュー
+        batch_menu = QMenu("&Batch Operations", self)
+
+        batch_edit_menu_action = QAction("&Edit Selected Books...", self)
+        batch_edit_menu_action.triggered.connect(self.show_batch_metadata_editor)
+        batch_edit_menu_action.setEnabled(False)
+        batch_menu.addAction(batch_edit_menu_action)
+        self.batch_edit_menu_action = batch_edit_menu_action
+
+        batch_add_to_series_menu_action = QAction("&Add to Series...", self)
+        batch_add_to_series_menu_action.triggered.connect(
+            self.show_batch_add_to_series_dialog
+        )
+        batch_add_to_series_menu_action.setEnabled(False)
+        batch_menu.addAction(batch_add_to_series_menu_action)
+        self.batch_add_to_series_menu_action = batch_add_to_series_menu_action
+
+        batch_remove_from_series_menu_action = QAction("&Remove from Series", self)
+        batch_remove_from_series_menu_action.triggered.connect(
+            self.batch_remove_from_series
+        )
+        batch_remove_from_series_menu_action.setEnabled(False)
+        batch_menu.addAction(batch_remove_from_series_menu_action)
+        self.batch_remove_from_series_menu_action = batch_remove_from_series_menu_action
+
+        batch_menu.addSeparator()
+
+        # 一括ステータス変更サブメニュー
+        batch_status_menu = QMenu("Mark as", self)
+
+        batch_mark_unread_menu_action = QAction("&Unread", self)
+        batch_mark_unread_menu_action.triggered.connect(
+            lambda: self.batch_mark_as_status(Book.STATUS_UNREAD)
+        )
+        batch_mark_unread_menu_action.setEnabled(False)
+        batch_status_menu.addAction(batch_mark_unread_menu_action)
+        self.batch_mark_unread_menu_action = batch_mark_unread_menu_action
+
+        batch_mark_reading_menu_action = QAction("&Reading", self)
+        batch_mark_reading_menu_action.triggered.connect(
+            lambda: self.batch_mark_as_status(Book.STATUS_READING)
+        )
+        batch_mark_reading_menu_action.setEnabled(False)
+        batch_status_menu.addAction(batch_mark_reading_menu_action)
+        self.batch_mark_reading_menu_action = batch_mark_reading_menu_action
+
+        batch_mark_completed_menu_action = QAction("&Completed", self)
+        batch_mark_completed_menu_action.triggered.connect(
+            lambda: self.batch_mark_as_status(Book.STATUS_COMPLETED)
+        )
+        batch_mark_completed_menu_action.setEnabled(False)
+        batch_status_menu.addAction(batch_mark_completed_menu_action)
+        self.batch_mark_completed_menu_action = batch_mark_completed_menu_action
+
+        batch_menu.addMenu(batch_status_menu)
+
+        batch_menu.addSeparator()
+
+        batch_remove_menu_action = QAction("&Remove Selected Books", self)
+        batch_remove_menu_action.triggered.connect(self.batch_remove_books)
+        batch_remove_menu_action.setEnabled(False)
+        batch_menu.addAction(batch_remove_menu_action)
+        self.batch_remove_menu_action = batch_remove_menu_action
+
+        edit_menu.addMenu(batch_menu)
+
         # 表示メニュー
         view_menu = self.menuBar().addMenu("&View")
 
@@ -248,36 +411,34 @@ class MainWindow(QMainWindow):
         """コンテキストメニュー機能のハンドラを設定する。"""
         # グリッドビューのコンテキストメニューハンドラ
         self.grid_view._edit_metadata = self.show_metadata_editor
+        self.grid_view._batch_edit_metadata = self.show_batch_metadata_editor
         self.grid_view._add_to_series = self.show_add_to_series_dialog
+        self.grid_view._batch_add_to_series = self.show_batch_add_to_series_dialog
+        self.grid_view._batch_remove_from_series = self.batch_remove_from_series
         self.grid_view._remove_book = self.remove_book
+        self.grid_view._batch_remove_books = self.batch_remove_books
 
         # リストビューのコンテキストメニューハンドラ
         self.list_view._edit_metadata = self.show_metadata_editor
+        self.list_view._batch_edit_metadata = self.show_batch_metadata_editor
         self.list_view._add_to_series = self.show_add_to_series_dialog
+        self.list_view._batch_add_to_series = self.show_batch_add_to_series_dialog
+        self.list_view._batch_remove_from_series = self.batch_remove_from_series
         self.list_view._remove_book = self.remove_book
+        self.list_view._batch_remove_books = self.batch_remove_books
 
     def setup_connections(self):
         """シグナルとスロットを接続する。"""
         # グリッドビューからの選択シグナル
         self.grid_view.book_selected.connect(self.on_book_selected)
+        self.grid_view.books_selected.connect(self.on_books_selected)
 
         # リストビューからの選択シグナル
         self.list_view.book_selected.connect(self.on_book_selected)
+        self.list_view.books_selected.connect(self.on_books_selected)
 
         # リーダービューからの進捗更新シグナル
         self.reader_view.progress_updated.connect(self.on_progress_updated)
-
-    def setup_context_menu_handlers(self):
-        """コンテキストメニュー機能のハンドラを設定する。"""
-        # グリッドビューのコンテキストメニューハンドラ
-        self.grid_view._edit_metadata = self.show_metadata_editor
-        self.grid_view._add_to_series = self.show_add_to_series_dialog
-        self.grid_view._remove_book = self.remove_book
-
-        # リストビューのコンテキストメニューハンドラ
-        self.list_view._edit_metadata = self.show_metadata_editor
-        self.list_view._add_to_series = self.show_add_to_series_dialog
-        self.list_view._remove_book = self.remove_book
 
     def populate_category_combo(self):
         """カテゴリコンボボックスにデータを設定する。"""
@@ -602,3 +763,549 @@ class MainWindow(QMainWindow):
         self.reader_view.close_current_book()
         self.db_manager.close()
         event.accept()
+
+    def toggle_multi_select_mode(self, enabled):
+        """
+        複数選択モードを切り替える。
+
+        Parameters
+        ----------
+        enabled : bool
+            複数選択モードを有効にするかどうか
+        """
+        # ツールバーとメニューの状態を同期
+        self.multi_select_action.setChecked(enabled)
+        self.multi_select_menu_action.setChecked(enabled)
+
+        # ビューの複数選択モードを切り替え
+        self.grid_view.toggle_multi_select_mode(enabled)
+        self.list_view.toggle_multi_select_mode(enabled)
+
+        # 全選択アクションの有効/無効を切り替え
+        self.select_all_action.setEnabled(enabled)
+        self.select_all_menu_action.setEnabled(enabled)
+
+        # 単一選択時のアクションの有効/無効を切り替え
+        self.edit_metadata_action.setEnabled(not enabled and self._has_selected_book())
+
+        # 複数選択関連のUIの有効/無効を切り替え
+        self.update_batch_actions_state()
+
+        # ステータスバーに表示
+        if enabled:
+            self.statusBar.showMessage("Multiple selection mode enabled")
+        else:
+            self.statusBar.showMessage("Multiple selection mode disabled")
+
+    def select_all_books(self):
+        """表示されているすべての書籍を選択する。"""
+        current_view = self.library_tabs.currentWidget()
+        if current_view:
+            current_view.select_all()
+
+    def on_book_selected(self, book_id):
+        """
+        書籍が選択されたときの処理（単一選択）。
+
+        Parameters
+        ----------
+        book_id : int
+            選択された書籍のID
+        """
+        # 複数選択モードを無効化
+        if self.multi_select_action.isChecked():
+            self.toggle_multi_select_mode(False)
+
+        # メタデータ編集アクションを有効化
+        self.edit_metadata_action.setEnabled(True)
+
+        # リーダービューに書籍を読み込む
+        success = self.reader_view.load_book(book_id)
+
+        if success:
+            # 選択状態をビュー間で同期
+            if self.sender() == self.grid_view:
+                self.list_view.select_book(book_id, emit_signal=False)
+            elif self.sender() == self.list_view:
+                self.grid_view.select_book(book_id, emit_signal=False)
+
+            # book_openedシグナルを発火
+            self.book_opened.emit(book_id)
+
+            # 書籍の情報をステータスバーに表示
+            book = self.library_controller.get_book(book_id)
+            if book:
+                self.statusBar.showMessage(
+                    f"Opened: {book.title} by {book.author or 'Unknown'}"
+                )
+        else:
+            self.statusBar.showMessage("Failed to open book")
+
+    def on_books_selected(self, book_ids):
+        """
+        複数の書籍が選択されたときの処理。
+
+        Parameters
+        ----------
+        book_ids : list
+            選択された書籍IDのリスト
+        """
+        # 選択数をステータスバーに表示
+        self.statusBar.showMessage(f"Selected {len(book_ids)} books")
+
+        # 一括操作のUI要素を更新
+        self.update_batch_actions_state(len(book_ids) > 0)
+
+        # 選択状態をビュー間で同期（必要に応じて）
+        current_view = self.library_tabs.currentWidget()
+        if current_view == self.grid_view:
+            # 選択がグリッドビューからの場合、リストビューを同期
+            self.sync_selection_to_list_view(book_ids)
+        elif current_view == self.list_view:
+            # 選択がリストビューからの場合、グリッドビューを同期
+            self.sync_selection_to_grid_view(book_ids)
+
+    def sync_selection_to_list_view(self, book_ids):
+        """
+        グリッドビューの選択をリストビューに同期する。
+
+        Parameters
+        ----------
+        book_ids : list
+            選択された書籍IDのリスト
+        """
+        # 複数選択モードを確保
+        self.list_view.toggle_multi_select_mode(True)
+
+        # 現在の選択をクリア
+        self.list_view.list_widget.clearSelection()
+
+        # 指定されたIDに対応するアイテムを選択
+        for i in range(self.list_view.list_widget.count()):
+            item = self.list_view.list_widget.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) in book_ids:
+                item.setSelected(True)
+
+    def sync_selection_to_grid_view(self, book_ids):
+        """
+        リストビューの選択をグリッドビューに同期する。
+
+        Parameters
+        ----------
+        book_ids : list
+            選択された書籍IDのリスト
+        """
+        # 複数選択モードを確保
+        self.grid_view.toggle_multi_select_mode(True)
+
+        # 現在の選択をクリア
+        self.grid_view._clear_selection()
+
+        # 指定されたIDを選択
+        for book_id in book_ids:
+            self.grid_view._select_book(book_id, add_to_selection=True)
+
+    def _has_selected_book(self):
+        """
+        書籍が選択されているかどうかを確認する。
+
+        Returns
+        -------
+        bool
+            書籍が選択されている場合はTrue
+        """
+        grid_selected = self.grid_view.get_selected_book_id() is not None
+        list_selected = self.list_view.get_selected_book_id() is not None
+        return grid_selected or list_selected
+
+    def update_batch_actions_state(self, has_selection=False):
+        """
+        複数選択関連のUI要素の状態を更新する。
+
+        Parameters
+        ----------
+        has_selection : bool
+            書籍が選択されているかどうか
+        """
+        # 複数選択モードがアクティブかどうか
+        is_multi_select = self.multi_select_action.isChecked()
+
+        # 有効/無効を設定
+        enabled = is_multi_select and has_selection
+
+        # ツールバーボタン
+        self.batch_actions_button.setEnabled(enabled)
+
+        # メニュー項目
+        self.batch_edit_menu_action.setEnabled(enabled)
+        self.batch_add_to_series_menu_action.setEnabled(enabled)
+        self.batch_remove_from_series_menu_action.setEnabled(enabled)
+        self.batch_mark_unread_menu_action.setEnabled(enabled)
+        self.batch_mark_reading_menu_action.setEnabled(enabled)
+        self.batch_mark_completed_menu_action.setEnabled(enabled)
+        self.batch_remove_menu_action.setEnabled(enabled)
+
+    def show_batch_metadata_editor(self, book_ids=None):
+        """
+        複数書籍のメタデータ一括編集ダイアログを表示する。
+
+        Parameters
+        ----------
+        book_ids : list, optional
+            編集する書籍IDのリスト。指定がない場合は現在選択されている書籍を使用。
+        """
+        if book_ids is None:
+            # 現在のビューに応じて選択書籍を取得
+            current_view = self.library_tabs.currentWidget()
+            if current_view == self.grid_view:
+                book_ids = self.grid_view.get_selected_book_ids()
+            else:
+                book_ids = self.list_view.get_selected_book_ids()
+
+        if not book_ids:
+            QMessageBox.warning(self, "Warning", "No books selected.")
+            return
+
+        try:
+            # BatchMetadataEditorをインポート
+            from views.batch_metadata_editor import BatchMetadataEditor
+
+            # ダイアログを表示
+            dialog = BatchMetadataEditor(self.library_controller, book_ids, self)
+            if dialog.exec():
+                # 書籍の表示を更新
+                for book_id in book_ids:
+                    self.grid_view.update_book_item(book_id)
+                    self.list_view.update_book_item(book_id)
+
+                self.statusBar.showMessage(
+                    f"Updated metadata for {len(book_ids)} books"
+                )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred: {str(e)}")
+
+    def show_batch_add_to_series_dialog(self, book_ids=None):
+        """
+        複数書籍を一括でシリーズに追加するダイアログを表示する。
+
+        Parameters
+        ----------
+        book_ids : list, optional
+            追加する書籍IDのリスト。指定がない場合は現在選択されている書籍を使用。
+        """
+        if book_ids is None:
+            # 現在のビューに応じて選択書籍を取得
+            current_view = self.library_tabs.currentWidget()
+            if current_view == self.grid_view:
+                book_ids = self.grid_view.get_selected_book_ids()
+            else:
+                book_ids = self.list_view.get_selected_book_ids()
+
+        if not book_ids:
+            QMessageBox.warning(self, "Warning", "No books selected.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add to Series")
+        dialog.setMinimumWidth(400)
+
+        layout = QVBoxLayout(dialog)
+        form_layout = QFormLayout()
+
+        # シリーズ選択
+        series_combo = QComboBox()
+        series_combo.addItem("-- Select Series --", None)
+
+        # シリーズの一覧を取得
+        series_list = self.library_controller.get_all_series()
+        for series in series_list:
+            series_combo.addItem(series.name, series.id)
+
+        form_layout.addRow("Series:", series_combo)
+
+        # 新しいシリーズの作成
+        new_series_layout = QHBoxLayout()
+        new_series_edit = QLineEdit()
+        new_series_edit.setPlaceholderText("Enter new series name")
+        new_series_layout.addWidget(new_series_edit)
+
+        create_button = QPushButton("Create")
+        new_series_layout.addWidget(create_button)
+
+        form_layout.addRow("New Series:", new_series_layout)
+
+        # シリーズ内の順番設定
+        order_method_combo = QComboBox()
+        order_method_combo.addItem("Auto-assign sequential numbers", "sequential")
+        order_method_combo.addItem("Use specific starting number", "specific")
+        order_method_combo.addItem("Do not assign order", "none")
+        form_layout.addRow("Order Method:", order_method_combo)
+
+        # 開始番号の入力欄
+        order_layout = QHBoxLayout()
+        start_order_spin = QSpinBox()
+        start_order_spin.setMinimum(1)
+        start_order_spin.setMaximum(9999)
+        start_order_spin.setValue(1)
+        order_layout.addWidget(start_order_spin)
+
+        preserve_current_check = QCheckBox("Keep current order when possible")
+        preserve_current_check.setChecked(True)
+        order_layout.addWidget(preserve_current_check)
+
+        form_layout.addRow("Starting Number:", order_layout)
+
+        # オーダーメソッドが変更されたときのハンドラ
+        def update_order_controls():
+            method = order_method_combo.currentData()
+            enabled = method != "none"
+            start_order_spin.setEnabled(enabled)
+            preserve_current_check.setEnabled(enabled)
+
+        order_method_combo.currentIndexChanged.connect(update_order_controls)
+        update_order_controls()  # 初期状態を設定
+
+        layout.addLayout(form_layout)
+
+        # ボタン
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # 「新しいシリーズ作成」ボタンが押されたときの処理
+        def create_new_series():
+            name = new_series_edit.text().strip()
+            if name:
+                series_id = self.library_controller.create_series(name=name)
+                if series_id:
+                    series_combo.addItem(name, series_id)
+                    index = series_combo.findData(series_id)
+                    if index >= 0:
+                        series_combo.setCurrentIndex(index)
+                    new_series_edit.clear()
+
+        create_button.clicked.connect(create_new_series)
+
+        # ダイアログを表示
+        if dialog.exec():
+            series_id = series_combo.currentData()
+            if series_id:
+                # 書籍をシリーズに追加
+                order_method = order_method_combo.currentData()
+
+                if order_method == "none":
+                    # 順番を指定しない場合はそのまま追加
+                    for book_id in book_ids:
+                        self.library_controller.update_book_metadata(
+                            book_id, series_id=series_id
+                        )
+                else:
+                    # 順番を指定する場合
+                    start_order = start_order_spin.value()
+                    preserve_current = preserve_current_check.isChecked()
+
+                    # 本のリストを取得
+                    books = [
+                        self.library_controller.get_book(book_id)
+                        for book_id in book_ids
+                    ]
+                    books = [book for book in books if book]  # Noneをフィルタリング
+
+                    if preserve_current:
+                        # 現在の順番を維持しつつソート
+                        books.sort(
+                            key=lambda b: (
+                                b.series_id != series_id,
+                                b.series_order or float("inf"),
+                                b.title,
+                            )
+                        )
+                    else:
+                        # タイトルでソート
+                        books.sort(key=lambda b: b.title)
+
+                    # 各本に順番を割り当て
+                    current_order = start_order
+                    for book in books:
+                        self.library_controller.update_book_metadata(
+                            book.id, series_id=series_id, series_order=current_order
+                        )
+                        current_order += 1
+
+                # ビューを更新
+                for book_id in book_ids:
+                    self.grid_view.update_book_item(book_id)
+                    self.list_view.update_book_item(book_id)
+
+                self.statusBar.showMessage(f"Added {len(book_ids)} books to series")
+
+    def batch_remove_from_series(self, book_ids=None):
+        """
+        複数書籍を一括でシリーズから削除する。
+
+        Parameters
+        ----------
+        book_ids : list, optional
+            削除する書籍IDのリスト。指定がない場合は現在選択されている書籍を使用。
+        """
+        if book_ids is None:
+            # 現在のビューに応じて選択書籍を取得
+            current_view = self.library_tabs.currentWidget()
+            if current_view == self.grid_view:
+                book_ids = self.grid_view.get_selected_book_ids()
+            else:
+                book_ids = self.list_view.get_selected_book_ids()
+
+        if not book_ids:
+            QMessageBox.warning(self, "Warning", "No books selected.")
+            return
+
+        # 確認ダイアログ
+        result = QMessageBox.question(
+            self,
+            "Confirm Remove from Series",
+            f"Are you sure you want to remove {len(book_ids)} books from their series?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        # 書籍をシリーズから削除
+        for book_id in book_ids:
+            self.library_controller.update_book_metadata(
+                book_id, series_id=None, series_order=None
+            )
+
+        # ビューを更新
+        for book_id in book_ids:
+            self.grid_view.update_book_item(book_id)
+            self.list_view.update_book_item(book_id)
+
+        self.statusBar.showMessage(f"Removed {len(book_ids)} books from series")
+
+    def batch_mark_as_status(self, status, book_ids=None):
+        """
+        複数書籍の読書状態を一括で設定する。
+
+        Parameters
+        ----------
+        status : str
+            設定する状態
+        book_ids : list, optional
+            対象の書籍IDリスト。指定がない場合は現在選択されている書籍を使用。
+        """
+        if book_ids is None:
+            # 現在のビューに応じて選択書籍を取得
+            current_view = self.library_tabs.currentWidget()
+            if current_view == self.grid_view:
+                book_ids = self.grid_view.get_selected_book_ids()
+            else:
+                book_ids = self.list_view.get_selected_book_ids()
+
+        if not book_ids:
+            QMessageBox.warning(self, "Warning", "No books selected.")
+            return
+
+        # 状態名をわかりやすい表示に変換
+        status_display = {
+            "unread": "Unread",
+            "reading": "Reading",
+            "completed": "Completed",
+        }.get(status, status)
+
+        # 書籍の状態を更新
+        for book_id in book_ids:
+            self.library_controller.update_book_progress(book_id, status=status)
+
+        # ビューを更新
+        for book_id in book_ids:
+            self.grid_view.update_book_item(book_id)
+            self.list_view.update_book_item(book_id)
+
+        self.statusBar.showMessage(f"Marked {len(book_ids)} books as {status_display}")
+
+    def batch_remove_books(self, book_ids=None):
+        """
+        複数書籍を一括で削除する。
+
+        Parameters
+        ----------
+        book_ids : list, optional
+            削除する書籍IDリスト。指定がない場合は現在選択されている書籍を使用。
+        """
+        if book_ids is None:
+            # 現在のビューに応じて選択書籍を取得
+            current_view = self.library_tabs.currentWidget()
+            if current_view == self.grid_view:
+                book_ids = self.grid_view.get_selected_book_ids()
+            else:
+                book_ids = self.list_view.get_selected_book_ids()
+
+        if not book_ids:
+            QMessageBox.warning(self, "Warning", "No books selected.")
+            return
+
+        # 確認ダイアログ
+        result = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to remove {len(book_ids)} books from the library?\n\n"
+            "This will only remove the books from the library, not delete the files.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        # 現在開いている書籍をチェック
+        if self.reader_view.current_book_id in book_ids:
+            self.reader_view.close_current_book()
+
+        # 書籍を一括削除
+        result = self.library_controller.batch_remove_books(
+            book_ids, delete_files=False
+        )
+
+        # 成功したIDを処理
+        if result["success"]:
+            # グリッドビューから削除
+            for book_id in result["success"]:
+                if book_id in self.grid_view.book_widgets:
+                    widget = self.grid_view.book_widgets[book_id]
+                    widget.setParent(None)
+                    widget.deleteLater()
+                    del self.grid_view.book_widgets[book_id]
+
+                    # 選択状態を更新
+                    if book_id in self.grid_view.selected_book_ids:
+                        self.grid_view.selected_book_ids.remove(book_id)
+                    if self.grid_view.selected_book_id == book_id:
+                        self.grid_view.selected_book_id = None
+
+            # リストビューから削除
+            for book_id in result["success"]:
+                for i in range(self.list_view.list_widget.count()):
+                    item = self.list_view.list_widget.item(i)
+                    if item and item.data(Qt.ItemDataRole.UserRole) == book_id:
+                        self.list_view.list_widget.takeItem(i)
+                        break
+
+        # 失敗したIDがある場合は警告
+        if result["failed"]:
+            QMessageBox.warning(
+                self, "Warning", f"Failed to remove {len(result['failed'])} books."
+            )
+
+        # ステータスバーに表示
+        self.statusBar.showMessage(
+            f"Removed {len(result['success'])} books from library"
+        )
+
+        # 複数選択関連のUIを更新
+        self.update_batch_actions_state()

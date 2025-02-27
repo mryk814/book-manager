@@ -479,3 +479,78 @@ class LibraryController:
             print(f"Error removing book: {e}")
             conn.rollback()
             return False
+
+    def batch_remove_books(self, book_ids, delete_files=False):
+        """
+        複数の書籍をライブラリから一括で削除する。
+
+        Parameters
+        ----------
+        book_ids : list
+            削除する書籍IDのリスト
+        delete_files : bool, optional
+            ファイル自体も削除するかどうか
+
+        Returns
+        -------
+        dict
+            成功したIDのリストと失敗したIDのリスト
+        """
+        if not book_ids:
+            return {"success": [], "failed": []}
+
+        success_ids = []
+        failed_ids = []
+
+        # 現在開いている書籍をチェック
+        current_book = self._current_book
+        current_book_id = current_book.id if current_book else None
+
+        for book_id in book_ids:
+            # 現在開いている書籍なら閉じる
+            if current_book_id == book_id:
+                current_book.close()
+                self._current_book = None
+
+            # 書籍情報を取得
+            book = self.get_book(book_id)
+            if not book:
+                failed_ids.append(book_id)
+                continue
+
+            file_path = book.file_path
+
+            # データベースから削除
+            conn = self.db_manager.connect()
+            cursor = conn.cursor()
+
+            try:
+                # 読書進捗を削除
+                cursor.execute(
+                    "DELETE FROM reading_progress WHERE book_id = ?", (book_id,)
+                )
+
+                # カスタムメタデータを削除
+                cursor.execute(
+                    "DELETE FROM custom_metadata WHERE book_id = ?", (book_id,)
+                )
+
+                # 書籍を削除
+                cursor.execute("DELETE FROM books WHERE id = ?", (book_id,))
+
+                conn.commit()
+
+                # ファイルを削除（オプション）
+                if delete_files and os.path.isfile(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError as e:
+                        print(f"Error deleting file: {e}")
+
+                success_ids.append(book_id)
+            except Exception as e:
+                print(f"Error removing book {book_id}: {e}")
+                conn.rollback()
+                failed_ids.append(book_id)
+
+        return {"success": success_ids, "failed": failed_ids}

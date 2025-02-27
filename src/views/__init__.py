@@ -1,5 +1,6 @@
 # Package initialization for views module
-from .main_window import MainWindow
+from .batch_metadata_editor import BatchMetadataEditor
 from .library_view import LibraryGridView, LibraryListView
-from .reader_view import PDFReaderView
+from .main_window import MainWindow
 from .metadata_editor import MetadataEditor
+from .reader_view import PDFReaderView

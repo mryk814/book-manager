@@ -54,15 +54,12 @@ class BookListItemWidget(QWidget):
         self.cover_label.setScaledContents(True)
         self.cover_label.setFrameShape(QFrame.Shape.Box)
 
-        cover_data = book.get_cover_image()
-        if cover_data:
-            pixmap = QPixmap()
-            pixmap.loadFromData(QByteArray(cover_data))
-            self.cover_label.setPixmap(pixmap)
-        else:
-            # デフォルト表紙
-            self.cover_label.setText("No Cover")
-            self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 初期状態ではプレースホルダー表示
+        self.cover_label.setText("...")
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # 画像読み込みを遅延実行
+        QTimer.singleShot(50, self.load_cover_image)
 
         layout.addWidget(self.cover_label)
 
@@ -110,6 +107,23 @@ class BookListItemWidget(QWidget):
 
         layout.addLayout(info_layout)
         layout.setStretch(1, 1)  # 情報部分を伸縮させる
+
+    def load_cover_image(self):
+        """表紙画像を非同期で読み込む"""
+        try:
+            # より小さいサムネイルサイズで取得
+            cover_data = self.book.get_cover_image(thumbnail_size=(48, 64))
+            if cover_data:
+                pixmap = QPixmap()
+                pixmap.loadFromData(QByteArray(cover_data))
+                self.cover_label.setPixmap(pixmap)
+            else:
+                # デフォルト表紙
+                self.cover_label.setText("No Cover")
+                self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        except Exception as e:
+            print(f"Error loading cover: {e}")
+            # エラー時も表示を変えない（目立たせない）
 
     def _get_status_color(self, status):
         """
@@ -202,19 +216,16 @@ class BookGridItemWidget(QWidget):
 
         # 表紙画像
         self.cover_label = QLabel()
-        self.cover_label.setFixedSize(128, 192)
+        self.cover_label.setFixedSize(150, 200)
         self.cover_label.setScaledContents(True)
         self.cover_label.setFrameShape(QFrame.Shape.Box)
 
-        cover_data = book.get_cover_image()
-        if cover_data:
-            pixmap = QPixmap()
-            pixmap.loadFromData(QByteArray(cover_data))
-            self.cover_label.setPixmap(pixmap)
-        else:
-            # デフォルト表紙
-            self.cover_label.setText("No Cover")
-            self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 初期状態ではプレースホルダー表示
+        self.cover_label.setText("Loading...")
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # 画像読み込みを遅延実行
+        QTimer.singleShot(50, self.load_cover_image)
 
         layout.addWidget(self.cover_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -345,6 +356,24 @@ class BookGridItemWidget(QWidget):
         self.status_label.setStyleSheet(
             f"color: {self._get_status_color(book.status)};"
         )
+
+    def load_cover_image(self):
+        """表紙画像を非同期で読み込む"""
+        try:
+            # 小さいサムネイルサイズで取得
+            cover_data = self.book.get_cover_image(thumbnail_size=(150, 200))
+            if cover_data:
+                pixmap = QPixmap()
+                pixmap.loadFromData(QByteArray(cover_data))
+                self.cover_label.setPixmap(pixmap)
+            else:
+                # デフォルト表紙
+                self.cover_label.setText("No Cover")
+                self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        except Exception as e:
+            print(f"Error loading cover: {e}")
+            self.cover_label.setText("Error")
+            self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
 
 class LibraryGridView(QScrollArea):

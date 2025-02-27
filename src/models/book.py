@@ -234,7 +234,7 @@ class Book:
 
         return success
 
-    def get_cover_image(self, force_reload=False):
+    def get_cover_image(self, force_reload=False, thumbnail_size=None):
         """
         表紙画像を取得する。
 
@@ -242,14 +242,28 @@ class Book:
         ----------
         force_reload : bool, optional
             強制的にPDFから再ロードするかどうか
+        thumbnail_size : tuple, optional
+            サムネイルサイズ (width, height)。指定しない場合は通常サイズで取得。
 
         Returns
         -------
         bytes または None
             表紙画像のバイナリデータ、もしくはエラー時はNone
         """
-        if not force_reload and self.data.get("cover_image"):
+        # 通常サイズのキャッシュがあり、サムネイルが不要なら通常の処理
+        if not force_reload and self.data.get("cover_image") and thumbnail_size is None:
             return self.data.get("cover_image")
+
+        # サムネイルサイズのキーを生成（キャッシュ用）
+        thumbnail_key = (
+            f"cover_image_{thumbnail_size[0]}x{thumbnail_size[1]}"
+            if thumbnail_size
+            else None
+        )
+
+        # サムネイルキャッシュがあれば使用
+        if not force_reload and thumbnail_key and self.data.get(thumbnail_key):
+            return self.data.get(thumbnail_key)
 
         if not self.exists():
             return None
@@ -259,12 +273,53 @@ class Book:
             if doc and len(doc) > 0:
                 # 最初のページを表紙として使用
                 page = doc[0]
-                pix = page.get_pixmap(matrix=fitz.Matrix(0.2, 0.2))  # 縮小して取得
+
+                if thumbnail_size:
+                    # サムネイル用に小さいサイズで取得
+                    target_width, target_height = thumbnail_size
+
+                    # ページのサイズを取得
+                    rect = page.rect
+                    page_width, page_height = rect.width, rect.height
+
+                    # 縦横比を維持したスケール計算
+                    scale_width = target_width / page_width
+                    scale_height = target_height / page_height
+                    scale = min(scale_width, scale_height) * 0.9  # 少し余白を持たせる
+
+                    # スケールに応じてピクセルマップ取得
+                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
+                else:
+                    # 通常サイズ（やや縮小）
+                    pix = page.get_pixmap(matrix=fitz.Matrix(0.2, 0.2))
+
+                # raw形式でバイトデータを取得
                 img_data = pix.tobytes()
 
-                # データベースに保存
-                self.db_manager.update_book(self.id, cover_image=img_data)
-                self.data["cover_image"] = img_data
+                # PIL/Pillowを使用してJPEG圧縮
+                try:
+                    import io
+
+                    from PIL import Image
+
+                    # ピクセルマップからPIL Imageを作成
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+                    # JPEGとして圧縮保存
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="JPEG", quality=85, optimize=True)
+                    img_data = buffer.getvalue()
+                except ImportError:
+                    # PILがない場合は圧縮なしで続行
+                    pass
+
+                # キャッシュに保存
+                if thumbnail_key:
+                    self.data[thumbnail_key] = img_data
+                else:
+                    # データベースに保存
+                    self.db_manager.update_book(self.id, cover_image=img_data)
+                    self.data["cover_image"] = img_data
 
                 return img_data
         except Exception as e:

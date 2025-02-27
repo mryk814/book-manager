@@ -109,6 +109,25 @@ class MainWindow(QMainWindow):
         # コンテキストメニュー機能の設定
         self.setup_context_menu_handlers()
 
+        # メインタブの変更を監視
+        self.main_tabs.currentChanged.connect(self.on_main_tab_changed)
+
+        # フィルタクリアが必要かのフラグ
+        self.needs_filter_clear = False
+
+        # シリーズのリスト（キャッシュ用）
+        self.all_series = []
+
+        # シリーズ書籍キャッシュ
+        self.series_books_cache = {}
+
+        # 最後に表示していたタブのインデックス
+        self.last_books_tab_index = 0
+
+        # フィルタ状態
+        self.current_series_id = None
+        self.in_series_filtered_mode = False
+
     def setup_toolbar(self):
         """ツールバーを設定する。"""
         self.toolbar = QToolBar("Main Toolbar")
@@ -510,6 +529,10 @@ class MainWindow(QMainWindow):
         # リーダービューからの進捗更新シグナル
         self.reader_view.progress_updated.connect(self.on_progress_updated)
 
+        # タブ切り替えの監視
+        self.library_tabs.currentChanged.connect(self.on_library_tab_changed)
+        self.main_tabs.currentChanged.connect(self.on_main_tab_changed)
+
     def populate_category_combo(self):
         """カテゴリコンボボックスにデータを設定する。"""
         self.category_combo.clear()
@@ -835,18 +858,17 @@ class MainWindow(QMainWindow):
         """ライブラリビューをリフレッシュする。"""
         # キャッシュをクリア
         self.series_books_cache = {}
+        self.all_series = []
 
-        # 現在表示中のシリーズがある場合は、そのシリーズの書籍のみをリフレッシュ
-        if self.current_series_id and self.back_to_series_button.isVisible():
-            self.filter_by_series(self.current_series_id)
+        # 現在の状態に応じてビューを更新
+        current_main_tab = self.main_tabs.currentWidget()
+
+        if current_main_tab == self.books_tab:
+            # 書籍タブがアクティブな場合
+            self.refresh_books_view()
         else:
-            # 通常のリフレッシュ
-            self.grid_view.refresh()
-            self.list_view.refresh()
-
-        # シリーズビューもリフレッシュ
-        self.series_grid_view.refresh()
-        self.series_list_view.refresh()
+            # シリーズタブがアクティブな場合
+            self.load_all_series()
 
         # カテゴリコンボボックスを更新
         self.populate_category_combo()
@@ -1468,14 +1490,21 @@ class MainWindow(QMainWindow):
         # 現在のシリーズIDを保存
         self.current_series_id = series_id
 
-        # シリーズの書籍をキャッシュに保存
-        if series_id not in self.series_books_cache:
-            # シリーズに属する書籍を先に取得してキャッシュに保存
-            books = self.library_controller.get_all_books(series_id=series_id)
-            self.series_books_cache[series_id] = books
+        # フィルタモードに設定
+        self.in_series_filtered_mode = True
 
-        # シリーズのビューを書籍に切り替え
-        self.show_series_books(series)
+        # ナビゲーションバーを更新
+        self.back_to_series_button.setVisible(True)
+        self.current_series_label.setText(f"Series: {series.name}")
+
+        # シリーズに属する書籍だけを表示
+        self.apply_series_filter(series_id)
+
+        # 現在のタブを記憶
+        self.last_books_tab_index = self.library_tabs.currentIndex()
+
+        # 書籍タブに切り替え
+        self.main_tabs.setCurrentWidget(self.books_tab)
 
         # スタータスバーにメッセージを表示
         self.statusBar.showMessage(f"Series: {series.name} ({len(series.books)} books)")
@@ -1505,11 +1534,14 @@ class MainWindow(QMainWindow):
         self.back_to_series_button.setVisible(False)
         self.current_series_label.setText("")
 
-        # フィルタをクリア
-        self.clear_series_filter()
+        # フィルタをクリアするフラグを立てる（実際のクリアは必要になるまで遅延）
+        self.needs_filter_clear = True
 
         # シリーズタブに切り替え
         self.main_tabs.setCurrentWidget(self.series_tab)
+
+        # ステータスバーのメッセージ更新（すぐにフィードバックを表示）
+        self.statusBar.showMessage("Showing series view")
 
     def filter_by_series(self, series_id):
         """
@@ -1543,11 +1575,9 @@ class MainWindow(QMainWindow):
 
     def clear_series_filter(self):
         """シリーズフィルタをクリアする。"""
-        self.grid_view.refresh()
-        self.list_view.refresh()
-
-        # キャッシュをクリア
+        # キャッシュをクリアするだけにして、実際のビューリフレッシュは行わない
         self.current_series_id = None
+        self.needs_filter_clear = False
 
     def update_series_view_state(self):
         """シリーズビュー状態を更新する。"""
@@ -1668,3 +1698,102 @@ class MainWindow(QMainWindow):
         except Exception as e:
             conn.rollback()
             QMessageBox.critical(self, "Error", f"Failed to remove series: {e}")
+
+    def on_main_tab_changed(self, index):
+        """
+        メインタブ（Books/Series）が変更されたときの処理
+
+        Parameters
+        ----------
+        index : int
+            新しいタブのインデックス
+        """
+        if index == 0:  # Booksタブ
+            # シリーズフィルタモードでなければ、全書籍を表示
+            if not self.in_series_filtered_mode:
+                # Booksビューを現在の状態に応じて更新
+                self.refresh_books_view()
+        else:  # Seriesタブ
+            # 一度もロードしていない場合はシリーズをロード
+            if not self.all_series:
+                self.load_all_series()
+
+    def on_library_tab_changed(self, index):
+        """
+        ライブラリタブ（Grid/List）が変更されたときの処理
+
+        Parameters
+        ----------
+        index : int
+            新しいタブのインデックス
+        """
+        self.last_books_tab_index = index
+
+        # シリーズフィルタモードで、ビュー切替時にシリーズフィルタを再適用
+        if self.in_series_filtered_mode and self.current_series_id:
+            self.apply_series_filter(self.current_series_id)
+
+    def load_all_series(self):
+        """すべてのシリーズをロードする"""
+        # シリーズを取得してキャッシュ
+        self.all_series = self.library_controller.get_all_series()
+
+        # シリーズビューを更新
+        self.series_grid_view.refresh()
+        self.series_list_view.refresh()
+
+    def apply_series_filter(self, series_id):
+        """
+        シリーズフィルタを適用する（高速処理版）
+
+        Parameters
+        ----------
+        series_id : int
+            フィルタリングするシリーズID
+        """
+        # キャッシュから書籍を取得（なければロード）
+        if series_id not in self.series_books_cache:
+            books = self.library_controller.get_all_books(series_id=series_id)
+            self.series_books_cache[series_id] = books
+        else:
+            books = self.series_books_cache[series_id]
+
+        # 現在のビューを取得
+        current_view = self.library_tabs.currentWidget()
+
+        # ビュータイプに基づいて表示を更新
+        if current_view == self.grid_view:
+            # グリッドビューの表示をクリア
+            self.grid_view._clear_grid()
+            # シリーズに属する書籍だけを表示
+            self.grid_view._populate_grid(books)
+        elif current_view == self.list_view:
+            # リストビューの表示をクリア
+            self.list_view.list_widget.clear()
+            # シリーズに属する書籍だけを表示
+            self.list_view._populate_list(books)
+
+    def show_series_view(self):
+        """シリーズビューに戻る"""
+        # ナビゲーションバーを更新
+        self.back_to_series_button.setVisible(False)
+        self.current_series_label.setText("")
+
+        # フィルタモードを解除
+        self.in_series_filtered_mode = False
+
+        # シリーズタブに切り替え
+        self.main_tabs.setCurrentWidget(self.series_tab)
+
+        # ステータスバーのメッセージ更新
+        self.statusBar.showMessage("Showing series view")
+
+    def refresh_books_view(self):
+        """書籍ビューを現在の状態に応じてリフレッシュする"""
+        if self.in_series_filtered_mode and self.current_series_id:
+            # シリーズフィルタモードの場合
+            self.apply_series_filter(self.current_series_id)
+        else:
+            # 通常モードの場合
+            self.grid_view.refresh()
+            self.list_view.refresh()

@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QByteArray, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QByteArray, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -364,14 +364,7 @@ class LibraryGridView(QScrollArea):
     books_selected = pyqtSignal(list)  # 選択された複数の book_id のリスト
 
     def __init__(self, library_controller, parent=None):
-        """
-        Parameters
-        ----------
-        library_controller : LibraryController
-            ライブラリコントローラ
-        parent : QWidget, optional
-            親ウィジェット
-        """
+        """コンストラクタ"""
         super().__init__(parent)
 
         self.library_controller = library_controller
@@ -403,19 +396,126 @@ class LibraryGridView(QScrollArea):
         # 書籍ウィジェットのマップ
         self.book_widgets = {}
 
-        # ライブラリを読み込む
-        self.refresh()
+        # 遅延ロード関連のプロパティ
+        self.all_books = []  # 全書籍データ
+        self.loaded_count = 0  # 読み込み済み件数
+        self.batch_size = 20  # 一度に読み込む件数
+        self.is_loading = False  # 読み込み中フラグ
+
+        # スクロールイベントを監視
+        self.verticalScrollBar().valueChanged.connect(self.check_scroll_position)
+
+        # 空のプレースホルダーを配置
+        self.placeholder = QLabel("Loading books...")
+        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
+        self.grid_layout.addWidget(self.placeholder, 0, 0)
 
     def refresh(self):
-        """ライブラリを再読み込みして表示を更新する。"""
+        """ライブラリを再読み込みして表示を更新する。（遅延ロード対応版）"""
         # グリッドをクリア
         self._clear_grid()
 
-        # 書籍を取得
-        books = self._get_filtered_books()
+        # 遅延ロード用の変数をリセット
+        self.loaded_count = 0
 
-        # グリッドに配置
-        self._populate_grid(books)
+        # プレースホルダーを表示
+        self.placeholder = QLabel("Loading books...")
+        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
+        self.grid_layout.addWidget(self.placeholder, 0, 0)
+
+        # 非同期で書籍データを取得
+        QTimer.singleShot(50, self._load_books_async)
+
+    def _load_books_async(self):
+        """書籍データを非同期で読み込む"""
+        # 書籍を取得
+        self.all_books = self._get_filtered_books()
+
+        # プレースホルダーを削除
+        if self.placeholder.parent() == self.content_widget:
+            self.placeholder.setParent(None)
+            self.placeholder.deleteLater()
+
+        # 最初のバッチをロード
+        self.load_more_books()
+
+    def load_more_books(self):
+        """追加の書籍を読み込む"""
+        if self.is_loading or self.loaded_count >= len(self.all_books):
+            return
+
+        self.is_loading = True
+
+        # 次のバッチのインデックス範囲を計算
+        start_idx = self.loaded_count
+        end_idx = min(start_idx + self.batch_size, len(self.all_books))
+
+        # グリッドのカラム数
+        columns = 4
+
+        # 書籍をグリッドに配置
+        for i in range(start_idx, end_idx):
+            book = self.all_books[i]
+            row = i // columns
+            col = i % columns
+
+            # 書籍ウィジェットを作成
+            book_widget = BookGridItemWidget(book)
+            book_widget.setFixedSize(150, 280)
+            book_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            book_widget.mousePressEvent = (
+                lambda event, b=book.id: self._on_book_clicked(event, b)
+            )
+
+            # グリッドに追加
+            self.grid_layout.addWidget(book_widget, row, col)
+
+            # マップに追加
+            self.book_widgets[book.id] = book_widget
+
+        # 読み込み済み件数を更新
+        self.loaded_count = end_idx
+
+        # 読み込み中フラグをリセット
+        self.is_loading = False
+
+        # すべての書籍を読み込んだか確認
+        if self.loaded_count < len(self.all_books):
+            # まだ未読込の書籍があればステータスメッセージを更新
+            try:
+                main_window = self.window()
+                if main_window and hasattr(main_window, "statusBar"):
+                    main_window.statusBar.showMessage(
+                        f"Loaded {self.loaded_count} of {len(self.all_books)} books"
+                    )
+            except Exception as e:
+                # ステータスバー更新でエラーが発生しても処理を続行
+                print(f"Error updating status bar: {e}")
+
+    def check_scroll_position(self, value):
+        """スクロール位置をチェックして、必要なら追加の書籍を読み込む"""
+        # スクロールが下部に近づいたら追加読み込み
+        scrollbar = self.verticalScrollBar()
+        if value > scrollbar.maximum() * 0.7:  # 70%以上スクロールしたら
+            self.load_more_books()
+
+    def _populate_grid(self, books):
+        """
+        書籍をグリッドに配置する。（遅延ロード対応版）
+
+        Parameters
+        ----------
+        books : list
+            Book オブジェクトのリスト
+        """
+        # 書籍データを保存
+        self.all_books = books
+
+        # 最初のバッチだけ即時表示
+        self.loaded_count = 0
+        self.load_more_books()
 
     def _clear_grid(self):
         """グリッドレイアウトをクリアする。"""
@@ -1018,14 +1118,7 @@ class LibraryListView(QWidget):
     books_selected = pyqtSignal(list)  # 選択された複数の book_id のリスト
 
     def __init__(self, library_controller, parent=None):
-        """
-        Parameters
-        ----------
-        library_controller : LibraryController
-            ライブラリコントローラ
-        parent : QWidget, optional
-            親ウィジェット
-        """
+        """コンストラクタ"""
         super().__init__(parent)
 
         self.library_controller = library_controller
@@ -1053,19 +1146,131 @@ class LibraryListView(QWidget):
         self.category_filter = None
         self.search_query = None
 
+        # 遅延ロード関連のプロパティ
+        self.all_books = []  # 全書籍データ
+        self.loaded_count = 0  # 読み込み済み件数
+        self.batch_size = 30  # 一度に読み込む件数
+        self.is_loading = False  # 読み込み中フラグ
+
+        # スクロールイベントを監視
+        self.list_widget.verticalScrollBar().valueChanged.connect(
+            self.check_scroll_position
+        )
+
+        # Loading表示用のアイテム
+        self.loading_item = QListWidgetItem("Loading more books...")
+        self.loading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
         # ライブラリを読み込む
         self.refresh()
 
     def refresh(self):
-        """ライブラリを再読み込みして表示を更新する。"""
+        """ライブラリを再読み込みして表示を更新する。（遅延ロード対応版）"""
         # リストをクリア
         self.list_widget.clear()
 
-        # 書籍を取得
-        books = self._get_filtered_books()
+        # 遅延ロード用の変数をリセット
+        self.loaded_count = 0
 
-        # リストに追加
-        self._populate_list(books)
+        # 一時的にローディングアイテムを表示
+        self.list_widget.addItem("Loading books...")
+
+        # 非同期で書籍データを取得
+        QTimer.singleShot(50, self._load_books_async)
+
+    def _load_books_async(self):
+        """書籍データを非同期で読み込む"""
+        # 書籍を取得
+        self.all_books = self._get_filtered_books()
+
+        # リストをクリア
+        self.list_widget.clear()
+
+        # 最初のバッチをロード
+        self.load_more_books()
+
+    def load_more_books(self):
+        """追加の書籍を読み込む"""
+        if self.is_loading or self.loaded_count >= len(self.all_books):
+            return
+
+        self.is_loading = True
+
+        # ローディングアイテムを一時的に削除
+        try:
+            self.list_widget.takeItem(self.list_widget.count() - 1)
+        except:
+            pass
+
+        # 次のバッチのインデックス範囲を計算
+        start_idx = self.loaded_count
+        end_idx = min(start_idx + self.batch_size, len(self.all_books))
+
+        # 書籍をリストに追加
+        for i in range(start_idx, end_idx):
+            book = self.all_books[i]
+
+            # リストアイテムを作成
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, book.id)  # 書籍IDを保存
+
+            # カスタムウィジェットを作成
+            widget = BookListItemWidget(book)
+
+            # アイテムのサイズを設定
+            item.setSizeHint(widget.sizeHint())
+
+            # リストに追加
+            self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, widget)
+
+        # まだロードする書籍が残っていれば、ローディングアイテムを追加
+        if end_idx < len(self.all_books):
+            self.list_widget.addItem("Loading more books...")
+
+        # 読み込み済み件数を更新
+        self.loaded_count = end_idx
+
+        # 読み込み中フラグをリセット
+        self.is_loading = False
+
+        # すべての書籍を読み込んだか確認
+        if self.loaded_count < len(self.all_books):
+            # まだ未読込の書籍があればステータスメッセージを更新
+            try:
+                if self.window() and hasattr(self.window(), "statusBar"):
+                    self.window().statusBar.showMessage(
+                        f"Loaded {self.loaded_count} of {len(self.all_books)} books"
+                    )
+            except Exception as e:
+                # ステータスバー更新でエラーが発生しても処理を続行
+                print(f"Error updating status bar: {e}")
+
+    def check_scroll_position(self, value):
+        """スクロール位置をチェックして、必要なら追加の書籍を読み込む"""
+        # スクロールが下部に近づいたら追加読み込み
+        scrollbar = self.list_widget.verticalScrollBar()
+        if value > scrollbar.maximum() * 0.7:  # 70%以上スクロールしたら
+            self.load_more_books()
+
+    def _populate_list(self, books):
+        """
+        書籍をリストに追加する。（遅延ロード対応版）
+
+        Parameters
+        ----------
+        books : list
+            Book オブジェクトのリスト
+        """
+        # 書籍データを保存
+        self.all_books = books
+
+        # リストをクリア
+        self.list_widget.clear()
+
+        # 最初のバッチをロード
+        self.loaded_count = 0
+        self.load_more_books()
 
     def _get_filtered_books(self):
         """

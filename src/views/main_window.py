@@ -1,23 +1,30 @@
 import os
 import sys
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QKeySequence
+from PyQt6.QtCore import QByteArray, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QKeySequence, QPalette, QPixmap
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMenuBar,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QStatusBar,
@@ -1509,24 +1516,20 @@ class MainWindow(QMainWindow):
         # スタータスバーにメッセージを表示
         self.statusBar.showMessage(f"Series: {series.name} ({len(series.books)} books)")
 
-    def show_series_books(self, series):
-        """
-        シリーズに属する書籍を表示する。
-
-        Parameters
-        ----------
-        series : Series
-            表示するシリーズオブジェクト
-        """
+    def show_series_view(self):
+        """シリーズビューに戻る"""
         # ナビゲーションバーを更新
-        self.back_to_series_button.setVisible(True)
-        self.current_series_label.setText(f"Series: {series.name}")
+        self.back_to_series_button.setVisible(False)
+        self.current_series_label.setText("")
 
-        # パフォーマンス改善: フィルタリングを最適化
-        self.filter_by_series(series.id)
+        # フィルタモードを解除
+        self.in_series_filtered_mode = False
 
-        # 書籍タブに切り替え
-        self.main_tabs.setCurrentWidget(self.books_tab)
+        # ユーザーにフィードバックを表示（応答性向上）
+        self.statusBar.showMessage("Returning to series view...")
+
+        # シリーズタブに切り替え
+        self.main_tabs.setCurrentWidget(self.series_tab)
 
     def show_series_view(self):
         """シリーズビューに戻る。"""
@@ -1709,14 +1712,21 @@ class MainWindow(QMainWindow):
             新しいタブのインデックス
         """
         if index == 0:  # Booksタブ
-            # シリーズフィルタモードでなければ、全書籍を表示
+            # シリーズフィルタモードでなければ、書籍ビューをリフレッシュする準備
             if not self.in_series_filtered_mode:
-                # Booksビューを現在の状態に応じて更新
-                self.refresh_books_view()
+                # ユーザーにフィードバックを表示
+                self.statusBar.showMessage("Loading books view...")
+
+                # 非同期でリフレッシュ（UI応答性を維持）
+                QTimer.singleShot(50, lambda: self._async_refresh_books_view())
         else:  # Seriesタブ
             # 一度もロードしていない場合はシリーズをロード
             if not self.all_series:
-                self.load_all_series()
+                # ユーザーにフィードバックを表示
+                self.statusBar.showMessage("Loading series view...")
+
+                # 非同期でシリーズをロード
+                QTimer.singleShot(50, lambda: self._async_load_all_series())
 
     def on_library_tab_changed(self, index):
         """
@@ -1797,3 +1807,19 @@ class MainWindow(QMainWindow):
             # 通常モードの場合
             self.grid_view.refresh()
             self.list_view.refresh()
+
+    def _async_refresh_books_view(self):
+        """書籍ビューを非同期でリフレッシュする（UI応答性維持のため）"""
+        # 書籍ビューをリフレッシュ
+        self.refresh_books_view()
+
+        # 完了メッセージを表示
+        self.statusBar.showMessage("Books view loaded")
+
+    def _async_load_all_series(self):
+        """シリーズを非同期でロードする（UI応答性維持のため）"""
+        # シリーズをロード
+        self.load_all_series()
+
+        # 完了メッセージを表示
+        self.statusBar.showMessage("Series view loaded")

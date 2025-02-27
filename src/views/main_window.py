@@ -1114,18 +1114,55 @@ class MainWindow(QMainWindow):
                     ]
                     books = [book for book in books if book]  # Noneをフィルタリング
 
+                    # 自然順ソートを実装（数値を考慮したソート）
+                    import re
+
+                    def natural_sort_key(book):
+                        """
+                        タイトルの自然順でソート
+                        """
+                        title = book.title if book.title else ""
+                        # 数値部分を抽出して数値として扱う
+                        return [
+                            int(c) if c.isdigit() else c.lower()
+                            for c in re.split(r"(\d+)", title)
+                        ]
+
                     if preserve_current:
                         # 現在の順番を維持しつつソート
                         books.sort(
                             key=lambda b: (
                                 b.series_id != series_id,
                                 b.series_order or float("inf"),
-                                b.title,
                             )
                         )
+                        # 同じ順番の本はタイトルの自然順でソート
+                        sorted_books = []
+                        current_order = None
+                        same_order_books = []
+
+                        for book in books:
+                            if book.series_order != current_order:
+                                if same_order_books:
+                                    # 同じ順番の本をタイトルでソート
+                                    sorted_books.extend(
+                                        sorted(same_order_books, key=natural_sort_key)
+                                    )
+                                    same_order_books = []
+                                current_order = book.series_order
+
+                            same_order_books.append(book)
+
+                        # 最後の同じ順番の本を処理
+                        if same_order_books:
+                            sorted_books.extend(
+                                sorted(same_order_books, key=natural_sort_key)
+                            )
+
+                        books = sorted_books
                     else:
-                        # タイトルでソート
-                        books.sort(key=lambda b: b.title)
+                        # タイトルでソート（自然順）
+                        books.sort(key=natural_sort_key)
 
                     # 各本に順番を割り当て
                     current_order = start_order

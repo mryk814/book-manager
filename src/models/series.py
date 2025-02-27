@@ -269,8 +269,24 @@ class Series:
         if not books:
             return None
 
-        # シリーズ順でソート
-        sorted_books = sorted(books, key=lambda b: b.series_order or float("inf"))
+        # 自然順でソート（数値を考慮したソート）
+        import re
+
+        def natural_sort_key(book):
+            """
+            series_orderを最優先し、次にタイトルの自然順でソート
+            """
+            # series_orderがNoneの場合は最大値とする（最後に表示）
+            order = book.series_order if book.series_order is not None else float("inf")
+            title = book.title if book.title else ""
+            # 数値部分を抽出して数値として扱う
+            title_key = [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
+            ]
+            return (order, title_key)
+
+        # 結果を自然順でソート
+        sorted_books = sorted(books, key=natural_sort_key)
         return sorted_books[0] if sorted_books else None
 
     def get_book_by_order(self, order):

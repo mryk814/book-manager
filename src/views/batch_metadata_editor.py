@@ -447,19 +447,39 @@ class BatchMetadataEditor(QDialog):
                     start_order = self.start_order_spin.value()
                     preserve_current = self.preserve_current_check.isChecked()
 
-                    # 本のリストをソート
+                    # 自然順ソートを実装（数値を考慮したソート）
+                    import re
+
+                    def natural_sort_key(book):
+                        """
+                        series_orderを最優先し、次にタイトルの自然順でソート
+                        """
+                        # series_orderがNoneの場合は最大値とする（最後に表示）
+                        order = (
+                            book.series_order
+                            if book.series_order is not None
+                            else float("inf")
+                        )
+                        title = book.title if book.title else ""
+                        # 数値部分を抽出して数値として扱う
+                        title_key = [
+                            int(c) if c.isdigit() else c.lower()
+                            for c in re.split(r"(\d+)", title)
+                        ]
+                        return (order, title_key)
+
                     if preserve_current:
                         # 現在の順番を維持しつつソート
                         sorted_books = sorted(
                             self.books,
                             key=lambda b: (
                                 b.series_id != series_id,
-                                b.series_order or float("inf"),
+                                natural_sort_key(b),
                             ),
                         )
                     else:
-                        # タイトルでソート
-                        sorted_books = sorted(self.books, key=lambda b: b.title)
+                        # タイトルでソート（自然順）
+                        sorted_books = sorted(self.books, key=natural_sort_key)
 
                     # 各本に順番を割り当て
                     current_order = start_order

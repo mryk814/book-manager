@@ -412,16 +412,39 @@ class DatabaseManager:
 
         cursor.execute(
             """
-        SELECT b.*, rp.status
-        FROM books b
-        LEFT JOIN reading_progress rp ON b.id = rp.book_id
-        WHERE b.series_id = ?
-        ORDER BY b.series_order, b.title
-        """,
+            SELECT b.*, rp.status, rp.current_page, rp.total_pages
+            FROM books b
+            LEFT JOIN reading_progress rp ON b.id = rp.book_id
+            WHERE b.series_id = ?
+            ORDER BY b.series_order, b.title COLLATE NOCASE
+            """,
             (series_id,),
         )
 
-        return [dict(row) for row in cursor.fetchall()]
+        results = [dict(row) for row in cursor.fetchall()]
+
+        # 自然順ソートを実装（数値を考慮したソート）
+        import re
+
+        def natural_sort_key(item):
+            """
+            series_orderを最優先し、次にタイトルの自然順でソート
+            """
+            # series_orderがNoneの場合は最大値とする（最後に表示）
+            order = (
+                item["series_order"]
+                if item["series_order"] is not None
+                else float("inf")
+            )
+            title = item["title"] if item["title"] else ""
+            # 数値部分を抽出して数値として扱う
+            title_key = [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
+            ]
+            return (order, title_key)
+
+        # 結果を自然順でソート
+        return sorted(results, key=natural_sort_key)
 
     def search_books(self, query=None, category_id=None, status=None):
         """
@@ -470,10 +493,28 @@ class DatabaseManager:
             sql += " AND rp.status = ?"
             params.append(status)
 
-        sql += " ORDER BY b.title"
+        # タイトルでソートするが、文字列のまま渡す
+        sql += " ORDER BY b.title COLLATE NOCASE"  # COLLATE NOCASEで大文字小文字を区別しない
 
         cursor.execute(sql, params)
-        return [dict(row) for row in cursor.fetchall()]
+        results = [dict(row) for row in cursor.fetchall()]
+
+        # 自然順ソートを実装（数値を考慮したソート）
+        import re
+
+        def natural_sort_key(item):
+            """
+            文字列内の数値を数値として扱うキー関数
+            '作品A（1）'と'作品A（10）'を正しく順序付ける
+            """
+            title = item["title"] if item["title"] else ""
+            # 数値部分を抽出して数値として扱う
+            return [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
+            ]
+
+        # 結果を自然順でソート
+        return sorted(results, key=natural_sort_key)
 
     def get_all_categories(self):
         """

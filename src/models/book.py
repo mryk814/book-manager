@@ -1,7 +1,9 @@
+import io
 import os
 from pathlib import Path
 
 import fitz  # PyMuPDF
+from PIL import Image, ImageChops
 
 
 class Book:
@@ -247,7 +249,7 @@ class Book:
 
         return success
 
-    def get_cover_image(self, force_reload=False, thumbnail_size=None):
+    def get_cover_image(self, force_reload=False, thumbnail_size=None, auto_trim=True):
         """
         表紙画像を取得する。
 
@@ -257,6 +259,8 @@ class Book:
             強制的にPDFから再ロードするかどうか
         thumbnail_size : tuple, optional
             サムネイルサイズ (width, height)。指定しない場合は通常サイズで取得。
+        auto_trim : bool, optional
+            左右の白い余白を自動的にトリミングするかどうか
 
         Returns
         -------
@@ -264,19 +268,16 @@ class Book:
             表紙画像のバイナリデータ、もしくはエラー時はNone
         """
         # 通常サイズのキャッシュがあり、サムネイルが不要なら通常の処理
-        if not force_reload and self.data.get("cover_image") and thumbnail_size is None:
-            return self.data.get("cover_image")
+        cache_key = "cover_image"
+        if thumbnail_size:
+            # サムネイルサイズのキーを生成（キャッシュ用）
+            cache_key = f"cover_image_{thumbnail_size[0]}x{thumbnail_size[1]}"
+            if auto_trim:
+                cache_key += "_h_trimmed"  # 水平トリミングを示す
 
-        # サムネイルサイズのキーを生成（キャッシュ用）
-        thumbnail_key = (
-            f"cover_image_{thumbnail_size[0]}x{thumbnail_size[1]}"
-            if thumbnail_size
-            else None
-        )
-
-        # サムネイルキャッシュがあれば使用
-        if not force_reload and thumbnail_key and self.data.get(thumbnail_key):
-            return self.data.get(thumbnail_key)
+        # キャッシュがあれば使用
+        if not force_reload and self.data.get(cache_key):
+            return self.data.get(cache_key)
 
         if not self.exists():
             return None
@@ -287,58 +288,147 @@ class Book:
                 # 最初のページを表紙として使用
                 page = doc[0]
 
+                # ピクセルマップを取得
                 if thumbnail_size:
-                    # サムネイル用に小さいサイズで取得
-                    target_width, target_height = thumbnail_size
-
-                    # ページのサイズを取得
+                    # サムネイルサイズに応じた縮小率を計算
                     rect = page.rect
                     page_width, page_height = rect.width, rect.height
+                    target_width, target_height = thumbnail_size
 
                     # 縦横比を維持したスケール計算
                     scale_width = target_width / page_width
                     scale_height = target_height / page_height
-                    scale = min(scale_width, scale_height) * 0.9  # 少し余白を持たせる
+                    scale = (
+                        min(scale_width, scale_height) * 1.2
+                    )  # 少し大きめに取得してトリミング可能にする
 
-                    # スケールに応じてピクセルマップ取得
                     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
                 else:
                     # 通常サイズ（やや縮小）
-                    pix = page.get_pixmap(matrix=fitz.Matrix(0.2, 0.2))
+                    pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
 
-                # raw形式でバイトデータを取得
-                img_data = pix.tobytes()
-
-                # PIL/Pillowを使用してJPEG圧縮
+                # PIL/Pillowを使用して処理
                 try:
                     import io
 
-                    from PIL import Image
+                    from PIL import Image, ImageChops
 
                     # ピクセルマップからPIL Imageを作成
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+                    # 自動トリミングを適用（横方向のみ）
+                    if auto_trim:
+                        img = self._trim_horizontal_white_borders(img)
+
+                    # サムネイルサイズにリサイズ
+                    if thumbnail_size:
+                        target_width, target_height = thumbnail_size
+
+                        # 縦横比を維持したスケール計算
+                        img_width, img_height = img.size
+                        scale_width = target_width / img_width
+                        scale_height = target_height / img_height
+                        scale = min(scale_width, scale_height)
+
+                        new_width = int(img_width * scale)
+                        new_height = int(img_height * scale)
+
+                        img = img.resize((new_width, new_height), Image.LANCZOS)
+
+                        # 中央揃えのための処理（余白を追加）
+                        if new_width < target_width or new_height < target_height:
+                            new_img = Image.new(
+                                "RGB", (target_width, target_height), (255, 255, 255)
+                            )
+                            paste_x = (target_width - new_width) // 2
+                            paste_y = (target_height - new_height) // 2
+                            new_img.paste(img, (paste_x, paste_y))
+                            img = new_img
 
                     # JPEGとして圧縮保存
                     buffer = io.BytesIO()
                     img.save(buffer, format="JPEG", quality=85, optimize=True)
                     img_data = buffer.getvalue()
+
+                    # キャッシュに保存
+                    self.data[cache_key] = img_data
+
+                    # 通常サイズの場合はデータベースにも保存
+                    if not thumbnail_size and not auto_trim:
+                        self.db_manager.update_book(self.id, cover_image=img_data)
+                        self.data["cover_image"] = img_data
+
+                    return img_data
                 except ImportError:
                     # PILがない場合は圧縮なしで続行
-                    pass
-
-                # キャッシュに保存
-                if thumbnail_key:
-                    self.data[thumbnail_key] = img_data
-                else:
-                    # データベースに保存
-                    self.db_manager.update_book(self.id, cover_image=img_data)
-                    self.data["cover_image"] = img_data
-
-                return img_data
+                    img_data = pix.tobytes()
+                    self.data[cache_key] = img_data
+                    return img_data
         except Exception as e:
             print(f"Error generating cover image: {e}")
 
         return None
+
+    def _trim_horizontal_white_borders(self, image, threshold=245, min_margin=5):
+        """
+        画像の左右の白い余白部分のみをトリミングする。
+        縦の高さは変更せず、横幅だけを最適化する。
+
+        Parameters
+        ----------
+        image : PIL.Image
+            トリミングする画像
+        threshold : int, optional
+            白と判断する閾値（0-255）
+        min_margin : int, optional
+            最低限残す余白のピクセル数
+
+        Returns
+        -------
+        PIL.Image
+            横方向のみトリミングされた画像
+        """
+        try:
+            width, height = image.size
+
+            # 横方向の境界を検出するためのヒストグラム的なアプローチ
+            left_bound = 0
+            right_bound = width - 1
+
+            # グレースケールに変換して処理を効率化
+            gray_img = image.convert("L")
+
+            # 左から内側に向かってスキャン
+            for x in range(width // 2):
+                # 列の平均明度を計算
+                column = [gray_img.getpixel((x, y)) for y in range(height)]
+                avg_brightness = sum(column) / len(column)
+
+                # 平均明度が閾値より低い（白でない）場合、これが左の境界
+                if avg_brightness < threshold:
+                    left_bound = max(0, x - min_margin)  # マージンを考慮
+                    break
+
+            # 右から内側に向かってスキャン
+            for x in range(width - 1, width // 2, -1):
+                # 列の平均明度を計算
+                column = [gray_img.getpixel((x, y)) for y in range(height)]
+                avg_brightness = sum(column) / len(column)
+
+                # 平均明度が閾値より低い（白でない）場合、これが右の境界
+                if avg_brightness < threshold:
+                    right_bound = min(width - 1, x + min_margin)  # マージンを考慮
+                    break
+
+            # トリミングが必要な場合のみ実行
+            if left_bound > 0 or right_bound < width - 1:
+                # 水平方向のみトリミング
+                return image.crop((left_bound, 0, right_bound + 1, height))
+        except Exception as e:
+            print(f"Error trimming horizontal borders: {e}")
+
+        # エラー時や変更不要時は元の画像を返す
+        return image
 
     def update_metadata(self, **kwargs):
         """

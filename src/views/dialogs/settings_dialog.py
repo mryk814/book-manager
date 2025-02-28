@@ -52,8 +52,8 @@ class SettingsDialog(QDialog):
         self.default_settings = {
             "general": {"startup_show_last_book": True, "confirm_delete": True},
             "appearance": {
-                "grid_columns": 4,
-                "grid_cover_size": 150,
+                "grid_columns": 3,
+                "grid_cover_size": 120,
                 "list_cover_size": 48,
                 "default_view": "grid",  # or "list"
             },

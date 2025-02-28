@@ -1,6 +1,6 @@
 import re
 
-from PyQt6.QtCore import QByteArray, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QByteArray, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -366,6 +366,8 @@ class SeriesGridView(QScrollArea):
         # グリッドレイアウト
         self.grid_layout = QGridLayout(self.content_widget)
         self.grid_layout.setSpacing(10)
+        # コンテンツマージンを最小化
+        self.grid_layout.setContentsMargins(5, 5, 5, 5)
 
         # 選択中のシリーズID
         self.selected_series_id = None
@@ -377,8 +379,82 @@ class SeriesGridView(QScrollArea):
         # シリーズウィジェットのマップ
         self.series_widgets = {}
 
+        # グリッド列数とアイテムの標準サイズ
+        self.grid_columns = 3  # デフォルト値
+        # SeriesGridItemWidgetのsetFixedSizに合わせて調整
+        self.item_width = 190
+        self.last_viewport_width = 0  # 前回のビューポート幅を記録
+
         # シリーズを読み込む
         self.refresh()
+
+    def resizeEvent(self, event):
+        """ウィジェットのサイズが変わったときに呼ばれる"""
+        super().resizeEvent(event)
+
+        # ビューポートの現在の幅を取得
+        current_width = self.viewport().width()
+
+        print(f"Series grid resize: viewport width = {current_width}px")
+
+        # 前回と同じ幅なら何もしない
+        if current_width == self.last_viewport_width:
+            return
+
+        self.last_viewport_width = current_width
+
+        # 列数を更新して再レイアウト
+        self.calculate_grid_columns()
+
+        # シリーズがロードされている場合のみ再レイアウト
+        if self.series_widgets:
+            self.relayout_grid()
+
+    def calculate_grid_columns(self):
+        """ビューポートの幅に基づいて列数を計算"""
+        viewport_width = self.viewport().width()
+
+        # 利用可能な幅に基づいて列数を計算
+        # グリッドレイアウトの左右のマージン分を引く
+        available_width = max(1, viewport_width - 10)  # 左右マージン各5px
+
+        # 列数を計算（少なくとも1列）
+        # 列間のスペース(10px)も考慮
+        new_columns = max(1, int(available_width / self.item_width))
+
+        # 列数が変わった場合に更新
+        if new_columns != self.grid_columns:
+            print(
+                f"Changing series grid columns from {self.grid_columns} to {new_columns} (viewport width: {viewport_width}px, available: {available_width}px)"
+            )
+            self.grid_columns = new_columns
+            return True
+        return False
+
+    def relayout_grid(self):
+        """グリッドレイアウトを現在の列数で再レイアウト"""
+        print(
+            f"Relayouting series grid with {self.grid_columns} columns, {len(self.series_widgets)} widgets"
+        )
+
+        # 現在表示されているウィジェットを取得
+        widgets = []
+        for series_id, widget in self.series_widgets.items():
+            # グリッドレイアウトからウィジェットを取り外す
+            self.grid_layout.removeWidget(widget)
+            widgets.append((series_id, widget))
+
+        # 列数に基づいて再配置
+        for i, (series_id, widget) in enumerate(widgets):
+            row = i // self.grid_columns
+            col = i % self.grid_columns
+            self.grid_layout.addWidget(widget, row, col)
+
+        # コンテンツウィジェットのサイズ調整を強制
+        width = min(self.grid_columns * self.item_width, self.viewport().width())
+
+        # コンテンツウィジェットの更新を強制
+        self.content_widget.updateGeometry()
 
     def refresh(self):
         """シリーズを再読み込みして表示を更新する。"""
@@ -388,8 +464,19 @@ class SeriesGridView(QScrollArea):
         # シリーズを取得
         series_list = self._get_filtered_series()
 
+        # 列数を計算
+        self.calculate_grid_columns()
+
         # グリッドに配置
         self._populate_grid(series_list)
+
+        # タイマーで少し遅らせて確実にレイアウトを更新
+        QTimer.singleShot(50, self.ensure_correct_layout)
+
+    def ensure_correct_layout(self):
+        """現在のビューポートサイズに基づいて正しいレイアウトを確保する"""
+        if self.calculate_grid_columns() and self.series_widgets:
+            self.relayout_grid()
 
     def _clear_grid(self):
         """グリッドレイアウトをクリアする。"""
@@ -447,8 +534,6 @@ class SeriesGridView(QScrollArea):
         series_list : list
             Series オブジェクトのリスト
         """
-        # グリッドのカラム数
-        columns = 4
 
         # 自然順ソート（シリーズ名の中の数字を考慮）
         def natural_sort_key(series):
@@ -461,12 +546,13 @@ class SeriesGridView(QScrollArea):
 
         # シリーズをグリッドに配置
         for i, series in enumerate(sorted_series):
-            row = i // columns
-            col = i % columns
+            row = i // self.grid_columns
+            col = i % self.grid_columns
 
             # シリーズウィジェットを作成
             series_widget = SeriesGridItemWidget(series)
-            series_widget.setFixedSize(180, 300)
+            # ここでのサイズがitem_widthと一致することを確認
+            series_widget.setFixedSize(190, 300)
             series_widget.setCursor(Qt.CursorShape.PointingHandCursor)
             series_widget.mousePressEvent = (
                 lambda event, s=series.id: self._on_series_clicked(event, s)
@@ -580,6 +666,8 @@ class SeriesGridView(QScrollArea):
         self.category_filter = category_id
         self.search_query = None  # 検索クエリをクリア
         self.refresh()
+        # ビューが表示された時に列数を再計算
+        QTimer.singleShot(50, self.ensure_correct_layout)
 
     def search(self, query):
         """
@@ -592,11 +680,15 @@ class SeriesGridView(QScrollArea):
         """
         self.search_query = query
         self.refresh()
+        # 検索結果表示後に列数を再計算
+        QTimer.singleShot(50, self.ensure_correct_layout)
 
     def clear_search(self):
         """検索をクリアしてすべてのシリーズを表示する。"""
         self.search_query = None
         self.refresh()
+        # ビュー更新後に列数を再計算
+        QTimer.singleShot(50, self.ensure_correct_layout)
 
     def update_series_item(self, series_id):
         """

@@ -465,8 +465,8 @@ class LibraryGridView(QScrollArea):
         self.is_loading = False  # 読み込み中フラグ
 
         # グリッド列数とアイテムの標準サイズ
-        self.grid_columns = 4  # デフォルト値
-        self.item_width = 150  # 書籍アイテムの幅（ウィジェット幅+マージン）
+        self.grid_columns = 3  # デフォルト値
+        self.item_width = 120  # 書籍アイテムの幅（ウィジェット幅+マージン）
         self.last_viewport_width = 0  # 前回のビューポート幅を記録
 
         # スクロールイベントを監視
@@ -511,9 +511,6 @@ class LibraryGridView(QScrollArea):
 
         # 列数が変わった場合に更新
         if new_columns != self.grid_columns:
-            print(
-                f"Changing grid columns from {self.grid_columns} to {new_columns} (viewport width: {viewport_width}px)"
-            )
             self.grid_columns = new_columns
             return True
         return False

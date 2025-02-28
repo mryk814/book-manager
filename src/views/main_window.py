@@ -606,6 +606,10 @@ class MainWindow(QMainWindow):
             self.grid_view_action.setChecked(index == 0)
             self.list_view_action.setChecked(index == 1)
 
+            # グリッドビューに切り替えた場合、レイアウトを更新
+            if index == 0:
+                QTimer.singleShot(100, self.grid_view.ensure_correct_layout)
+
             # シリーズを表示中なら、ビュー切替時にシリーズフィルタを再適用
             if self.current_series_id and self.back_to_series_button.isVisible():
                 self.filter_by_series(self.current_series_id)
@@ -613,9 +617,9 @@ class MainWindow(QMainWindow):
         elif current_main_tab == self.series_tab:
             self.series_tabs.setCurrentIndex(index)
 
-        # グリッドビューに切り替えた場合、レイアウトを更新
-        if index == 0 and self.library_tabs.currentWidget() == self.grid_view:
-            QTimer.singleShot(100, self.grid_view.ensure_correct_layout)
+            # グリッドビューに切り替えた場合、レイアウトを更新
+            if index == 0:
+                QTimer.singleShot(100, self.series_grid_view.ensure_correct_layout)
 
     def filter_by_category(self, index):
         """
@@ -1728,6 +1732,11 @@ class MainWindow(QMainWindow):
 
                 # 非同期でリフレッシュ（UI応答性を維持）
                 QTimer.singleShot(50, lambda: self._async_refresh_books_view())
+
+                # グリッドビューのレイアウトを更新
+                current_view = self.library_tabs.currentWidget()
+                if current_view == self.grid_view:
+                    QTimer.singleShot(100, self.grid_view.ensure_correct_layout)
         else:  # Seriesタブ
             # 一度もロードしていない場合はシリーズをロード
             if not self.all_series:
@@ -1736,6 +1745,11 @@ class MainWindow(QMainWindow):
 
                 # 非同期でシリーズをロード
                 QTimer.singleShot(50, lambda: self._async_load_all_series())
+
+            # シリーズグリッドビューのレイアウトを更新
+            current_view = self.series_tabs.currentWidget()
+            if current_view == self.series_grid_view:
+                QTimer.singleShot(100, self.series_grid_view.ensure_correct_layout)
 
     def on_library_tab_changed(self, index):
         """

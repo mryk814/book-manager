@@ -616,8 +616,8 @@ class MetadataEditor(QDialog):
             self.category_combo.addItem(category["name"], category["id"])
 
         # 現在のカテゴリを選択
-        if book.category_id:
-            index = self.category_combo.findData(book.category_id)
+        if self.book.category_id:
+            index = self.category_combo.findData(self.book.category_id)
             if index >= 0:
                 self.category_combo.setCurrentIndex(index)
 

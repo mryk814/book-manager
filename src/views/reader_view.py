@@ -214,26 +214,22 @@ class PDFReaderView(QWidget):
             )
             return False
 
-        # 書籍とページ番号を設定
         self.library_controller.set_current_book(book)
         self.current_book_id = book_id
         self.current_page_num = book.current_page
 
-        # UI状態を更新
         self.update_ui_state(True)
 
-        # 表示領域をグラフィックスビューに変更
-        self.scroll_area.takeWidget()  # プレースホルダーを取り外す
+        self.scroll_area.takeWidget()
         self.scroll_area.setWidget(self.graphics_view)
 
-        # 最初のページを表示
         self.show_current_page()
 
-        # 進捗スライダーを更新
         self.update_progress_slider()
 
-        # ページコンボボックスを更新
         self.update_page_combo()
+
+        self.fit_to_page()
 
         return True
 

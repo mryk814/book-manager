@@ -464,20 +464,78 @@ class LibraryGridView(QScrollArea):
         self.batch_size = 20  # 一度に読み込む件数
         self.is_loading = False  # 読み込み中フラグ
 
-        # グリッド列数
+        # グリッド列数とアイテムの標準サイズ
         self.grid_columns = 4  # デフォルト値
+        self.item_width = 150  # 書籍アイテムの幅（ウィジェット幅+マージン）
+        self.last_viewport_width = 0  # 前回のビューポート幅を記録
 
         # スクロールイベントを監視
         self.verticalScrollBar().valueChanged.connect(self.check_scroll_position)
-
-        # ウィンドウサイズ変更を検知
-        self.viewport().installEventFilter(self)
 
         # 空のプレースホルダーを配置
         self.placeholder = QLabel("Loading books...")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
         self.grid_layout.addWidget(self.placeholder, 0, 0)
+
+    def resizeEvent(self, event):
+        """ウィジェットのサイズが変わったときに呼ばれる"""
+        super().resizeEvent(event)
+
+        # ビューポートの現在の幅を取得
+        current_width = self.viewport().width()
+
+        # 前回と同じ幅なら何もしない
+        if current_width == self.last_viewport_width:
+            return
+
+        self.last_viewport_width = current_width
+
+        # 列数を更新して再レイアウト
+        self.calculate_grid_columns()
+
+        # 書籍がロードされている場合のみ再レイアウト
+        if self.book_widgets:
+            self.relayout_grid()
+
+    def calculate_grid_columns(self):
+        """ビューポートの幅に基づいて列数を計算"""
+        viewport_width = self.viewport().width()
+
+        # 利用可能な幅に基づいて列数を計算
+        # 20pxはスクロールバーやマージン用の余白
+        available_width = max(1, viewport_width - 20)
+
+        # 列数を計算（少なくとも1列）
+        new_columns = max(1, available_width // self.item_width)
+
+        # 列数が変わった場合に更新
+        if new_columns != self.grid_columns:
+            print(
+                f"Changing grid columns from {self.grid_columns} to {new_columns} (viewport width: {viewport_width}px)"
+            )
+            self.grid_columns = new_columns
+            return True
+        return False
+
+    def relayout_grid(self):
+        """グリッドレイアウトを現在の列数で再レイアウト"""
+
+        # 現在表示されているウィジェットを取得
+        widgets = []
+        for book_id, widget in self.book_widgets.items():
+            # グリッドレイアウトからウィジェットを取り外す
+            self.grid_layout.removeWidget(widget)
+            widgets.append((book_id, widget))
+
+        # 列数に基づいて再配置
+        for i, (book_id, widget) in enumerate(widgets):
+            row = i // self.grid_columns
+            col = i % self.grid_columns
+            self.grid_layout.addWidget(widget, row, col)
+
+        # コンテンツウィジェットの更新を強制
+        self.content_widget.updateGeometry()
 
     def refresh(self):
         """ライブラリを再読み込みして表示を更新する。（遅延ロード対応版）"""
@@ -506,6 +564,9 @@ class LibraryGridView(QScrollArea):
             self.placeholder.setParent(None)
             self.placeholder.deleteLater()
 
+        # 列数を計算
+        self.calculate_grid_columns()
+
         # 最初のバッチをロード
         self.load_more_books()
 
@@ -520,14 +581,11 @@ class LibraryGridView(QScrollArea):
         start_idx = self.loaded_count
         end_idx = min(start_idx + self.batch_size, len(self.all_books))
 
-        # 現在の列数を使用
-        columns = self.grid_columns
-
         # 書籍をグリッドに配置
         for i in range(start_idx, end_idx):
             book = self.all_books[i]
-            row = i // columns
-            col = i % columns
+            row = i // self.grid_columns
+            col = i % self.grid_columns
 
             # 書籍ウィジェットを作成
             book_widget = BookGridItemWidget(book)
@@ -561,6 +619,19 @@ class LibraryGridView(QScrollArea):
             except Exception as e:
                 # ステータスバー更新でエラーが発生しても処理を続行
                 print(f"Error updating status bar: {e}")
+
+    def _load_books_async(self):
+        """書籍データを非同期で読み込む"""
+        # 書籍を取得
+        self.all_books = self._get_filtered_books()
+
+        # プレースホルダーを削除
+        if self.placeholder.parent() == self.content_widget:
+            self.placeholder.setParent(None)
+            self.placeholder.deleteLater()
+
+        # 最初のバッチをロード
+        self.load_more_books()
 
     def check_scroll_position(self, value):
         """スクロール位置をチェックして、必要なら追加の書籍を読み込む"""
@@ -1079,6 +1150,8 @@ class LibraryGridView(QScrollArea):
         self.category_filter = category_id
         self.search_query = None  # 検索クエリをクリア
         self.refresh()
+        # ビューが表示された時に列数を再計算
+        QTimer.singleShot(50, self.ensure_correct_layout)
 
     def search(self, query):
         """
@@ -1091,11 +1164,15 @@ class LibraryGridView(QScrollArea):
         """
         self.search_query = query
         self.refresh()
+        # 検索結果表示後に列数を再計算
+        QTimer.singleShot(50, self.ensure_correct_layout)
 
     def clear_search(self):
         """検索をクリアしてすべての書籍を表示する。"""
         self.search_query = None
         self.refresh()
+        # ビュー更新後に列数を再計算
+        QTimer.singleShot(50, self.ensure_correct_layout)
 
     def update_book_item(self, book_id):
         """
@@ -1174,28 +1251,6 @@ class LibraryGridView(QScrollArea):
         if self.selected_book_ids:
             self.books_selected.emit(list(self.selected_book_ids))
 
-    def relayout_grid(self):
-        """グリッドレイアウトを現在の列数で再レイアウト"""
-        # レイアウトをクリアせずにウィジェットを一旦取り外す
-        widgets = []
-
-        for book_id, widget in self.book_widgets.items():
-            # 親から切り離す
-            widget.setParent(None)
-            widgets.append((book_id, widget))
-
-        # 新しい列数でグリッドに再配置
-        for i, (book_id, widget) in enumerate(widgets):
-            row = i // self.grid_columns
-            col = i % self.grid_columns
-
-            # グリッドに追加
-            self.grid_layout.addWidget(widget, row, col)
-
-        # 必要に応じてさらに読み込む
-        if self.loaded_count < len(self.all_books):
-            self.load_more_books()
-
     def eventFilter(self, obj, event):
         """イベントフィルタでリサイズイベントを検知"""
         if obj == self.viewport() and event.type() == QEvent.Type.Resize:
@@ -1221,6 +1276,11 @@ class LibraryGridView(QScrollArea):
             # 表示中の場合、レイアウトを更新
             if not self.is_loading and self.loaded_count > 0:
                 self.relayout_grid()
+
+    def ensure_correct_layout(self):
+        """現在のビューポートサイズに基づいて正しいレイアウトを確保する"""
+        if self.calculate_grid_columns() and self.book_widgets:
+            self.relayout_grid()
 
 
 class LibraryListView(QWidget):

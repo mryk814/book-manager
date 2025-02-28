@@ -103,7 +103,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.addWidget(self.reader_panel)
 
         # スプリッターの初期サイズを設定
-        self.main_splitter.setSizes([300, 700])
+        self.main_splitter.setSizes([550, 700])
 
         # スプリッターハンドルのストレッチファクタを設定
         # 0: 左側のウィジェットは固定サイズ、1: 右側のウィジェットが伸縮
@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
         self.main_splitter.splitterMoved.connect(self.on_splitter_moved)
 
         # 記憶された左側サイズ（初期値）
-        self.left_panel_width = 300
+        self.left_panel_width = 550
 
         # ステータスバーの設定
         self.statusBar = QStatusBar()
@@ -145,6 +145,14 @@ class MainWindow(QMainWindow):
         # フィルタ状態
         self.current_series_id = None
         self.in_series_filtered_mode = False
+
+        # 初期表示時のレイアウト調整を遅延実行
+        QTimer.singleShot(500, self.initial_layout_adjustment)
+
+    def initial_layout_adjustment(self):
+        """初期表示時のレイアウト調整"""
+        self.grid_view.ensure_correct_layout()
+        self.list_view.update()  # リストビューの更新も念のため
 
     def setup_toolbar(self):
         """ツールバーを設定する。"""
@@ -604,6 +612,10 @@ class MainWindow(QMainWindow):
 
         elif current_main_tab == self.series_tab:
             self.series_tabs.setCurrentIndex(index)
+
+        # グリッドビューに切り替えた場合、レイアウトを更新
+        if index == 0 and self.library_tabs.currentWidget() == self.grid_view:
+            QTimer.singleShot(100, self.grid_view.ensure_correct_layout)
 
     def filter_by_category(self, index):
         """
@@ -1521,6 +1533,9 @@ class MainWindow(QMainWindow):
         # 書籍タブに切り替え
         self.main_tabs.setCurrentWidget(self.books_tab)
 
+        # グリッドレイアウトを適切に更新するためのタイマーを設定
+        QTimer.singleShot(200, self.ensure_grid_layout)
+
         # スタータスバーにメッセージを表示
         self.statusBar.showMessage(f"Series: {series.name} ({len(series.books)} books)")
 
@@ -1538,21 +1553,6 @@ class MainWindow(QMainWindow):
 
         # シリーズタブに切り替え
         self.main_tabs.setCurrentWidget(self.series_tab)
-
-    def show_series_view(self):
-        """シリーズビューに戻る。"""
-        # ナビゲーションバーを更新
-        self.back_to_series_button.setVisible(False)
-        self.current_series_label.setText("")
-
-        # フィルタをクリアするフラグを立てる（実際のクリアは必要になるまで遅延）
-        self.needs_filter_clear = True
-
-        # シリーズタブに切り替え
-        self.main_tabs.setCurrentWidget(self.series_tab)
-
-        # ステータスバーのメッセージ更新（すぐにフィードバックを表示）
-        self.statusBar.showMessage("Showing series view")
 
     def filter_by_series(self, series_id):
         """
@@ -1583,6 +1583,7 @@ class MainWindow(QMainWindow):
             self.list_view.list_widget.clear()
             # シリーズに属する書籍を表示
             self.list_view._populate_list(books)
+        QTimer.singleShot(100, self.ensure_correct_layout)
 
     def clear_series_filter(self):
         """シリーズフィルタをクリアする。"""
@@ -1873,3 +1874,9 @@ class MainWindow(QMainWindow):
             self.main_splitter.setSizes(
                 [self.left_panel_width, splitter_width - self.left_panel_width]
             )
+
+    def ensure_grid_layout(self):
+        """グリッドレイアウトが適切に更新されるようにする"""
+        current_view = self.library_tabs.currentWidget()
+        if current_view == self.grid_view:
+            self.grid_view.ensure_correct_layout()

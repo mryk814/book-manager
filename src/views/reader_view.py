@@ -158,6 +158,8 @@ class PDFReaderView(QWidget):
         self.graphics_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        self.graphics_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.graphics_view.keyPressEvent = self._handle_key_press
 
         # グラフィックスシーン
         self.scene = QGraphicsScene()
@@ -587,3 +589,41 @@ class PDFReaderView(QWidget):
 
         # ページに移動
         self.go_to_page(page_num)
+
+    def _handle_key_press(self, event):
+        """
+        キーボードイベントを処理する。
+
+        Parameters
+        ----------
+        event : QKeyEvent
+            キーボードイベント
+        """
+        if event.key() == Qt.Key.Key_Left:
+            self.go_to_previous_page()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Right:
+            self.go_to_next_page()
+            event.accept()
+        else:
+            # その他のキーは通常通り処理
+            super().keyPressEvent(event)
+
+    def keyPressEvent(self, event):
+        """
+        ウィジェット全体のキーボードイベントを処理する。
+
+        Parameters
+        ----------
+        event : QKeyEvent
+            キーボードイベント
+        """
+        if event.key() == Qt.Key.Key_Left:
+            self.go_to_previous_page()
+            event.accept()
+        elif event.key() == Qt.Key.Key_Right:
+            self.go_to_next_page()
+            event.accept()
+        else:
+            # その他のキーは通常通り処理
+            super().keyPressEvent(event)

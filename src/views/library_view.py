@@ -1103,11 +1103,6 @@ class LibraryGridView(QScrollArea):
             book = self.library_controller.get_book(book_id)
 
             if book:
-                # デバッグ: 更新する書籍の情報を出力
-                print(
-                    f"Updating UI for book {book_id}: category_id={book.category_id}, category_name={book.category_name}"
-                )
-
                 # 書籍ウィジェットを更新
                 self.book_widgets[book_id].update_book_info(book)
 

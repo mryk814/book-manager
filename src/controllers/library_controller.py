@@ -406,9 +406,6 @@ class LibraryController:
         bool
             更新が成功したかどうか
         """
-        # デバッグ: 更新前の書籍データを確認
-        old_book = self.get_book(book_id)
-        print(f"Before update - Book {book_id}: category_id={old_book.category_id}")
 
         book = self.get_book(book_id)
         if book:

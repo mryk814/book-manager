@@ -395,8 +395,6 @@ class SeriesGridView(QScrollArea):
         # ビューポートの現在の幅を取得
         current_width = self.viewport().width()
 
-        print(f"Series grid resize: viewport width = {current_width}px")
-
         # 前回と同じ幅なら何もしない
         if current_width == self.last_viewport_width:
             return
@@ -424,18 +422,12 @@ class SeriesGridView(QScrollArea):
 
         # 列数が変わった場合に更新
         if new_columns != self.grid_columns:
-            print(
-                f"Changing series grid columns from {self.grid_columns} to {new_columns} (viewport width: {viewport_width}px, available: {available_width}px)"
-            )
             self.grid_columns = new_columns
             return True
         return False
 
     def relayout_grid(self):
         """グリッドレイアウトを現在の列数で再レイアウト"""
-        print(
-            f"Relayouting series grid with {self.grid_columns} columns, {len(self.series_widgets)} widgets"
-        )
 
         # 現在表示されているウィジェットを取得
         widgets = []

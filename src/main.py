@@ -4,8 +4,9 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtWidgets import QApplication, QSplashScreen
 
 from models.database import DatabaseManager
 from views.main_window import MainWindow
@@ -102,6 +103,32 @@ def load_settings():
     return default_settings
 
 
+def perform_db_migration(db_path, splash=None):
+    """
+    データベースマイグレーションを実行する。
+
+    Parameters
+    ----------
+    db_path : str
+        データベースファイルのパス
+    splash : QSplashScreen, optional
+        スプラッシュスクリーン
+    """
+    if splash:
+        splash.showMessage(
+            "データベースマイグレーションを実行中...",
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
+        )
+
+    try:
+        temp_db_manager = DatabaseManager(db_path)
+        temp_db_manager.migrate_database()
+        temp_db_manager.close()
+        logging.info("Database migration completed successfully")
+    except Exception as e:
+        logging.error(f"Database migration failed: {e}")
+
+
 def main():
     """アプリケーションのエントリーポイント。"""
     # ロギングを設定
@@ -112,12 +139,31 @@ def main():
     app.setApplicationName("PDF Library Manager")
     app.setApplicationVersion("1.0.0")
 
+    # スプラッシュスクリーンの表示
+    splash_pixmap = QPixmap(300, 200)
+    splash_pixmap.fill(Qt.GlobalColor.white)
+    splash = QSplashScreen(splash_pixmap)
+    splash.showMessage(
+        "起動中...", Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter
+    )
+    splash.show()
+
+    # スプラッシュスクリーンを確実に表示させるために処理を少し遅らせる
+    app.processEvents()
+
     # アプリケーションアイコンを設定（アイコンファイルがある場合）
     icon_path = os.path.join(
         os.path.dirname(__file__), "resources", "icons", "app_icon.png"
     )
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
+
+    # スプラッシュ画面を更新
+    splash.showMessage(
+        "設定を読み込み中...",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
+    )
+    app.processEvents()
 
     # 設定を読み込む
     settings = load_settings()
@@ -146,18 +192,24 @@ def main():
     if db_dir:  # ディレクトリパスが空でない場合のみ作成
         os.makedirs(db_dir, exist_ok=True)
 
-    # データベースマイグレーションを実行 - ここを追加
-    try:
-        temp_db_manager = DatabaseManager(db_path)
-        temp_db_manager.migrate_database()
-        temp_db_manager.close()
-        logging.info("Database migration completed successfully")
-    except Exception as e:
-        logging.error(f"Database migration failed: {e}")
+    # データベースマイグレーションを実行
+    perform_db_migration(db_path, splash)
 
     # メインウィンドウを作成
-    window = MainWindow(db_path)
-    window.show()
+    splash.showMessage(
+        "ライブラリインターフェースを初期化中...",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
+    )
+    app.processEvents()
+
+    window = MainWindow(db_path, splash)
+
+    # スプラッシュスクリーンが少なくとも1.5秒は表示されるようにする
+    # (起動が早すぎる場合でもユーザーが起動していることを認識できるように)
+    QTimer.singleShot(1500, lambda: window.show())
+
+    # スプラッシュスクリーンを閉じるのはwindow.showの直後
+    QTimer.singleShot(1500, lambda: splash.finish(window))
 
     # アプリケーションを実行
     sys.exit(app.exec())

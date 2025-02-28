@@ -5,6 +5,7 @@ from PyQt6.QtCore import QByteArray, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QKeySequence, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -22,10 +23,12 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSplashScreen,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -44,7 +47,12 @@ from views.library_view import LibraryGridView, LibraryListView
 from views.metadata_editor import MetadataEditor
 from views.reader_view import PDFReaderView
 from views.series_editor import SeriesEditor
-from views.series_view import SeriesGridView, SeriesListView
+from views.series_view import (
+    SeriesGridItemWidget,
+    SeriesGridView,
+    SeriesListItemWidget,
+    SeriesListView,
+)
 
 
 class MainWindow(QMainWindow):
@@ -58,27 +66,35 @@ class MainWindow(QMainWindow):
     # カスタムシグナル
     book_opened = pyqtSignal(int)  # book_id
 
-    def __init__(self, db_path="library.db"):
+    def __init__(self, db_path="library.db", splash=None):
         """
         Parameters
         ----------
         db_path : str, optional
             データベースファイルのパス。デフォルトは'library.db'。
+        splash : QSplashScreen, optional
+            スプラッシュスクリーン
         """
         super().__init__()
 
+        self.splash = splash
+        self.loading = True
+
         # モデルとコントローラの初期化
+        self._update_splash("データベース接続を初期化中...")
         self.db_manager = DatabaseManager(db_path)
         self.library_controller = LibraryController(self.db_manager)
 
         # ウィンドウの基本設定
         self.setWindowTitle("PDF Library Manager")
-        self.setMinimumSize(1920, 1080)
+        self.setMinimumSize(1280, 720)
 
         # メインウィジェットとレイアウトの設定
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
+
+        self._update_splash("UIコンポーネントを初期化中...")
 
         # ツールバーの設定
         self.setup_toolbar()
@@ -119,7 +135,16 @@ class MainWindow(QMainWindow):
         # ステータスバーの設定
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Ready")
+
+        # ロード中のプログレスバーを追加
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setRange(0, 0)  # インデターミネートモード
+        self.progress_bar.setMaximumWidth(100)
+        self.statusBar.addPermanentWidget(self.progress_bar)
+        self.progress_bar.setVisible(True)
+
+        self.statusBar.showMessage("ライブラリデータを読み込み中...")
 
         # シグナルとスロットの接続
         self.setup_connections()
@@ -146,12 +171,60 @@ class MainWindow(QMainWindow):
         self.current_series_id = None
         self.in_series_filtered_mode = False
 
-        # 初期表示時のレイアウト調整を遅延実行
-        QTimer.singleShot(500, self.initial_layout_adjustment)
+        # 非同期でデータをロード
+        QTimer.singleShot(50, self.async_initialize_data)
+
+    def _update_splash(self, message):
+        """スプラッシュスクリーンのメッセージを更新する"""
+        if self.splash:
+            self.splash.showMessage(
+                message, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter
+            )
+            QApplication.processEvents()
+
+    def async_initialize_data(self):
+        """非同期でアプリケーションデータを初期化する"""
+        # ライブラリビューを非同期で初期化
+        self._update_splash("書籍データを読み込み中...")
+        QTimer.singleShot(0, self.load_books_async)
+
+    def load_books_async(self):
+        """書籍データを非同期でロードする"""
+        self.statusBar.showMessage("書籍データを読み込み中...")
+        # 遅延ロード機能はLibraryGridViewクラスの中で実装済みのため、
+        # ここでは単に初期化を開始するだけ
+        self.grid_view.refresh()
+        self.list_view.refresh()
+
+        # シリーズの読み込みは書籍の読み込み後に行う
+        QTimer.singleShot(100, self.load_series_async)
+
+    def load_series_async(self):
+        """シリーズデータを非同期でロードする"""
+        self.statusBar.showMessage("シリーズデータを読み込み中...")
+        self._update_splash("シリーズデータを読み込み中...")
+
+        # シリーズを読み込む
+        self.all_series = self.library_controller.get_all_series()
+        self.series_grid_view.refresh()
+        self.series_list_view.refresh()
+
+        # すべてのデータロードが完了
+        QTimer.singleShot(100, self.finish_loading)
+
+    def finish_loading(self):
+        """データロードの完了処理"""
+        self.loading = False
+        self.progress_bar.setVisible(False)
+        self.statusBar.showMessage("ライブラリの読み込みが完了しました", 3000)
+
+        # グリッドビューのレイアウトを調整
+        QTimer.singleShot(100, self.initial_layout_adjustment)
 
     def initial_layout_adjustment(self):
         """初期表示時のレイアウト調整"""
         self.grid_view.ensure_correct_layout()
+        self.series_grid_view.ensure_correct_layout()
         self.list_view.update()  # リストビューの更新も念のため
 
     def setup_toolbar(self):

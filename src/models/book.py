@@ -1,5 +1,7 @@
+import hashlib
 import io
 import os
+import time
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -26,6 +28,12 @@ class Book:
     STATUS_READING = "reading"
     STATUS_COMPLETED = "completed"
 
+    # 表紙画像キャッシュの設定
+    # クラスレベルのキャッシュを追加（メモリ使用量を制限するため）
+    _cover_cache = {}  # {cache_key: (timestamp, data)}
+    _cache_size_limit = 300  # キャッシュするアイテム数の上限
+    _cache_time_limit = 600  # キャッシュの有効期限（秒）
+
     def __init__(self, book_data, db_manager):
         """
         Parameters
@@ -39,6 +47,7 @@ class Book:
         self.db_manager = db_manager
         self._document = None
         self._custom_metadata = None
+        self._local_cover_cache = {}  # インスタンスごとのキャッシュ
 
     @property
     def id(self):
@@ -186,6 +195,28 @@ class Book:
         except Exception as e:
             print(f"Error reading PDF metadata: {e}")
 
+    @classmethod
+    def _cleanup_cache(cls):
+        """古いキャッシュエントリをクリーンアップする"""
+        # キャッシュサイズが制限を超えた場合、または古いエントリがある場合にクリーンアップ
+        current_time = time.time()
+
+        if len(cls._cover_cache) > cls._cache_size_limit:
+            # 最も古いエントリから削除
+            entries = sorted(cls._cover_cache.items(), key=lambda x: x[1][0])
+            # サイズ制限の半分だけ削除
+            for key, _ in entries[: cls._cache_size_limit // 2]:
+                del cls._cover_cache[key]
+
+        # 期限切れのエントリを削除
+        expired_keys = [
+            key
+            for key, (timestamp, _) in cls._cover_cache.items()
+            if current_time - timestamp > cls._cache_time_limit
+        ]
+        for key in expired_keys:
+            del cls._cover_cache[key]
+
     def get_page(self, page_number):
         """
         指定ページのPixmapを取得する。
@@ -249,9 +280,40 @@ class Book:
 
         return success
 
+    def _get_cache_key(self, thumbnail_size=None, auto_trim=False):
+        """
+        キャッシュキーを生成する。
+
+        Parameters
+        ----------
+        thumbnail_size : tuple, optional
+            サムネイルサイズ (width, height)
+        auto_trim : bool, optional
+            トリミングフラグ
+
+        Returns
+        -------
+        str
+            キャッシュキー
+        """
+        # ファイルパスとIDに基づいたユニークなキーを生成
+        base_key = f"{self.id}_{self.file_path}"
+
+        # サイズとトリミング情報を含める
+        if thumbnail_size:
+            size_key = f"_{thumbnail_size[0]}x{thumbnail_size[1]}"
+            if auto_trim:
+                size_key += "_trimmed"
+        else:
+            size_key = "_full"
+
+        # ハッシュを使用して短くする
+        hash_key = hashlib.md5(f"{base_key}{size_key}".encode()).hexdigest()
+        return hash_key
+
     def get_cover_image(self, force_reload=False, thumbnail_size=None, auto_trim=True):
         """
-        表紙画像を取得する。
+        表紙画像を取得する。最適化されたキャッシュメカニズムを使用。
 
         Parameters
         ----------
@@ -267,22 +329,42 @@ class Book:
         bytes または None
             表紙画像のバイナリデータ、もしくはエラー時はNone
         """
-        # 通常サイズのキャッシュがあり、サムネイルが不要なら通常の処理
-        cache_key = "cover_image"
-        if thumbnail_size:
-            # サムネイルサイズのキーを生成（キャッシュ用）
-            cache_key = f"cover_image_{thumbnail_size[0]}x{thumbnail_size[1]}"
-            if auto_trim:
-                cache_key += "_h_trimmed"  # 水平トリミングを示す
+        # キャッシュキーを生成
+        cache_key = self._get_cache_key(thumbnail_size, auto_trim)
 
-        # キャッシュがあれば使用
-        if not force_reload and self.data.get(cache_key):
-            return self.data.get(cache_key)
+        # クラスキャッシュから取得を試みる
+        if not force_reload and cache_key in self._cover_cache:
+            timestamp, data = self._cover_cache[cache_key]
+            # キャッシュの有効期限をチェック
+            if time.time() - timestamp <= self._cache_time_limit:
+                return data
 
+        # インスタンスキャッシュから取得を試みる
+        if not force_reload and cache_key in self._local_cover_cache:
+            return self._local_cover_cache[cache_key]
+
+        # データベースキャッシュを確認（通常サイズのみ）
+        if (
+            not force_reload
+            and not thumbnail_size
+            and not auto_trim
+            and self.data.get("cover_image")
+        ):
+            # インスタンスキャッシュとクラスキャッシュの両方に保存
+            self._local_cover_cache[cache_key] = self.data["cover_image"]
+            # クラスキャッシュは一定期間経過後に自動クリーンアップ
+            self._cover_cache[cache_key] = (time.time(), self.data["cover_image"])
+            # キャッシュサイズをチェックして必要に応じてクリーンアップ
+            if len(self._cover_cache) > self._cache_size_limit:
+                self._cleanup_cache()
+            return self.data["cover_image"]
+
+        # PDFファイルが存在するか確認
         if not self.exists():
             return None
 
         try:
+            # PDFを開く
             doc = self.open()
             if doc and len(doc) > 0:
                 # 最初のページを表紙として使用
@@ -302,17 +384,19 @@ class Book:
                         min(scale_width, scale_height) * 1.2
                     )  # 少し大きめに取得してトリミング可能にする
 
-                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
+                    # 非同期実行中に例外が発生する場合に対処
+                    try:
+                        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
+                    except Exception as e:
+                        print(f"Error getting pixmap for thumbnail: {e}")
+                        # 代替として通常サイズで取得して後でリサイズ
+                        pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
                 else:
                     # 通常サイズ（やや縮小）
                     pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
 
                 # PIL/Pillowを使用して処理
                 try:
-                    import io
-
-                    from PIL import Image, ImageChops
-
                     # ピクセルマップからPIL Imageを作成
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
@@ -333,6 +417,7 @@ class Book:
                         new_width = int(img_width * scale)
                         new_height = int(img_height * scale)
 
+                        # アンチエイリアスあり高品質リサイズ（LANCZOS）
                         img = img.resize((new_width, new_height), Image.LANCZOS)
 
                         # 中央揃えのための処理（余白を追加）
@@ -345,13 +430,18 @@ class Book:
                             new_img.paste(img, (paste_x, paste_y))
                             img = new_img
 
-                    # JPEGとして圧縮保存
+                    # JPEGとして圧縮保存（最適化オプション使用）
                     buffer = io.BytesIO()
                     img.save(buffer, format="JPEG", quality=85, optimize=True)
                     img_data = buffer.getvalue()
 
                     # キャッシュに保存
-                    self.data[cache_key] = img_data
+                    self._local_cover_cache[cache_key] = img_data
+                    self._cover_cache[cache_key] = (time.time(), img_data)
+
+                    # キャッシュサイズをチェックして必要に応じてクリーンアップ
+                    if len(self._cover_cache) > self._cache_size_limit:
+                        self._cleanup_cache()
 
                     # 通常サイズの場合はデータベースにも保存
                     if not thumbnail_size and not auto_trim:
@@ -362,7 +452,15 @@ class Book:
                 except ImportError:
                     # PILがない場合は圧縮なしで続行
                     img_data = pix.tobytes()
-                    self.data[cache_key] = img_data
+                    self._local_cover_cache[cache_key] = img_data
+                    self._cover_cache[cache_key] = (time.time(), img_data)
+                    return img_data
+                except Exception as e:
+                    # その他の例外はログに記録して続行
+                    print(f"Error processing cover image with PIL: {e}")
+                    img_data = pix.tobytes()
+                    self._local_cover_cache[cache_key] = img_data
+                    self._cover_cache[cache_key] = (time.time(), img_data)
                     return img_data
         except Exception as e:
             print(f"Error generating cover image: {e}")
@@ -391,17 +489,16 @@ class Book:
         try:
             width, height = image.size
 
-            # 横方向の境界を検出するためのヒストグラム的なアプローチ
-            left_bound = 0
-            right_bound = width - 1
-
             # グレースケールに変換して処理を効率化
             gray_img = image.convert("L")
 
             # 左から内側に向かってスキャン
-            for x in range(width // 2):
+            left_bound = 0
+            for x in range(width // 4):  # 最大でも画像の1/4までスキャン（効率化）
                 # 列の平均明度を計算
-                column = [gray_img.getpixel((x, y)) for y in range(height)]
+                column = [
+                    gray_img.getpixel((x, y)) for y in range(0, height, 4)
+                ]  # 4ピクセルごとにサンプリング（効率化）
                 avg_brightness = sum(column) / len(column)
 
                 # 平均明度が閾値より低い（白でない）場合、これが左の境界
@@ -410,9 +507,14 @@ class Book:
                     break
 
             # 右から内側に向かってスキャン
-            for x in range(width - 1, width // 2, -1):
+            right_bound = width - 1
+            for x in range(
+                width - 1, width * 3 // 4, -1
+            ):  # 最大でも画像の3/4からスキャン（効率化）
                 # 列の平均明度を計算
-                column = [gray_img.getpixel((x, y)) for y in range(height)]
+                column = [
+                    gray_img.getpixel((x, y)) for y in range(0, height, 4)
+                ]  # 4ピクセルごとにサンプリング（効率化）
                 avg_brightness = sum(column) / len(column)
 
                 # 平均明度が閾値より低い（白でない）場合、これが右の境界
@@ -420,8 +522,8 @@ class Book:
                     right_bound = min(width - 1, x + min_margin)  # マージンを考慮
                     break
 
-            # トリミングが必要な場合のみ実行
-            if left_bound > 0 or right_bound < width - 1:
+            # トリミングが必要な場合のみ実行（大幅な変更がある場合のみ）
+            if left_bound > width * 0.05 or right_bound < width * 0.95:
                 # 水平方向のみトリミング
                 return image.crop((left_bound, 0, right_bound + 1, height))
         except Exception as e:

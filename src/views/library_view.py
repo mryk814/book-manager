@@ -1,7 +1,8 @@
-from PyQt6.QtCore import QByteArray, QEvent, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -225,6 +226,7 @@ class BookGridItemWidget(QWidget):
         super().__init__(parent)
 
         self.book = book
+        self.cover_loaded = False
 
         # レイアウトの設定
         layout = QVBoxLayout(self)
@@ -239,9 +241,10 @@ class BookGridItemWidget(QWidget):
         # 初期状態ではプレースホルダー表示
         self.cover_label.setText("Loading...")
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover_label.setStyleSheet("background-color: #f0f0f0;")
 
-        # 画像読み込みを遅延実行
-        QTimer.singleShot(50, self.load_cover_image)
+        # 画像読み込みは遅延実行する（初回表示時）
+        # 明示的なロード要求まで読み込みを遅延させる
 
         layout.addWidget(self.cover_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -392,6 +395,9 @@ class BookGridItemWidget(QWidget):
 
     def load_cover_image(self):
         """表紙画像を非同期で読み込む"""
+        if self.cover_loaded:
+            return
+
         try:
             # 小さいサムネイルサイズで取得
             cover_data = self.book.get_cover_image(thumbnail_size=(150, 200))
@@ -399,14 +405,23 @@ class BookGridItemWidget(QWidget):
                 pixmap = QPixmap()
                 pixmap.loadFromData(QByteArray(cover_data))
                 self.cover_label.setPixmap(pixmap)
+                self.cover_loaded = True
             else:
                 # デフォルト表紙
                 self.cover_label.setText("No Cover")
                 self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.cover_loaded = True
         except Exception as e:
             print(f"Error loading cover: {e}")
             self.cover_label.setText("Error")
             self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.cover_loaded = True  # エラーでも読み込み完了とマーク
+
+    def enterEvent(self, event):
+        """ウィジェットにマウスが入ったとき、優先的に表紙を読み込む"""
+        if not self.cover_loaded:
+            QTimer.singleShot(10, self.load_cover_image)
+        super().enterEvent(event)
 
 
 class LibraryGridView(QScrollArea):
@@ -463,14 +478,19 @@ class LibraryGridView(QScrollArea):
         self.loaded_count = 0  # 読み込み済み件数
         self.batch_size = 20  # 一度に読み込む件数
         self.is_loading = False  # 読み込み中フラグ
+        self.loading_timer = None  # 読み込みタイマー
+        self.visible_widgets = set()  # 現在表示範囲内にあるウィジェット
 
         # グリッド列数とアイテムの標準サイズ
         self.grid_columns = 3  # デフォルト値
-        self.item_width = 120  # 書籍アイテムの幅（ウィジェット幅+マージン）
+        self.item_width = 190  # 書籍アイテムの幅（ウィジェット幅+マージン）
         self.last_viewport_width = 0  # 前回のビューポート幅を記録
 
         # スクロールイベントを監視
         self.verticalScrollBar().valueChanged.connect(self.check_scroll_position)
+
+        # 表示状態も監視（表示されたときに読み込みを最適化するため）
+        self.installEventFilter(self)
 
         # 空のプレースホルダーを配置
         self.placeholder = QLabel("Loading books...")
@@ -497,6 +517,13 @@ class LibraryGridView(QScrollArea):
         # 書籍がロードされている場合のみ再レイアウト
         if self.book_widgets:
             self.relayout_grid()
+
+    def eventFilter(self, obj, event):
+        """表示イベントをフィルタリングして、表示されたときに最適化する"""
+        if event.type() == QEvent.Type.Show:
+            # 表示されたときに一度だけスクロール位置をチェック
+            QTimer.singleShot(100, self.update_visible_widgets)
+        return super().eventFilter(obj, event)
 
     def calculate_grid_columns(self):
         """ビューポートの幅に基づいて列数を計算"""
@@ -533,6 +560,9 @@ class LibraryGridView(QScrollArea):
 
         # コンテンツウィジェットの更新を強制
         self.content_widget.updateGeometry()
+
+        # 表示範囲内のウィジェットを更新
+        QTimer.singleShot(50, self.update_visible_widgets)
 
     def refresh(self):
         """ライブラリを再読み込みして表示を更新する。（遅延ロード対応版）"""
@@ -586,7 +616,7 @@ class LibraryGridView(QScrollArea):
 
             # 書籍ウィジェットを作成
             book_widget = BookGridItemWidget(book)
-            book_widget.setFixedSize(150, 280)
+            book_widget.setFixedSize(190, 280)
             book_widget.setCursor(Qt.CursorShape.PointingHandCursor)
             book_widget.mousePressEvent = (
                 lambda event, b=book.id: self._on_book_clicked(event, b)
@@ -617,18 +647,41 @@ class LibraryGridView(QScrollArea):
                 # ステータスバー更新でエラーが発生しても処理を続行
                 print(f"Error updating status bar: {e}")
 
-    def _load_books_async(self):
-        """書籍データを非同期で読み込む"""
-        # 書籍を取得
-        self.all_books = self._get_filtered_books()
+        # 表示範囲内のウィジェットの表紙を読み込む
+        QTimer.singleShot(50, self.update_visible_widgets)
 
-        # プレースホルダーを削除
-        if self.placeholder.parent() == self.content_widget:
-            self.placeholder.setParent(None)
-            self.placeholder.deleteLater()
+    def update_visible_widgets(self):
+        """現在表示範囲内にあるウィジェットを特定し、表紙画像を優先的に読み込む"""
+        if not self.book_widgets:
+            return
 
-        # 最初のバッチをロード
-        self.load_more_books()
+        # スクロール領域の表示範囲を取得
+        viewport_rect = self.viewport().rect()
+        scrollbar_value = self.verticalScrollBar().value()
+
+        # 表示範囲を調整（スクロール位置を考慮）
+        visible_top = scrollbar_value
+        visible_bottom = scrollbar_value + viewport_rect.height()
+
+        # 表示範囲内のウィジェットを特定
+        new_visible_widgets = set()
+
+        for book_id, widget in self.book_widgets.items():
+            widget_pos = widget.mapTo(self.content_widget, QPoint(0, 0))
+            widget_top = widget_pos.y()
+            widget_bottom = widget_top + widget.height()
+
+            # ウィジェットが表示範囲内にあるか判定
+            if widget_bottom >= visible_top and widget_top <= visible_bottom:
+                new_visible_widgets.add(book_id)
+
+                # まだ表紙が読み込まれていなければ読み込む
+                if isinstance(widget, BookGridItemWidget) and not widget.cover_loaded:
+                    # 非同期で表紙を読み込む
+                    QTimer.singleShot(10, widget.load_cover_image)
+
+        # 表示ウィジェットセットを更新
+        self.visible_widgets = new_visible_widgets
 
     def check_scroll_position(self, value):
         """スクロール位置をチェックして、必要なら追加の書籍を読み込む"""
@@ -637,24 +690,15 @@ class LibraryGridView(QScrollArea):
         if value > scrollbar.maximum() * 0.7:  # 70%以上スクロールしたら
             self.load_more_books()
 
-    def _populate_grid(self, books):
-        """
-        書籍をグリッドに配置する。（遅延ロード対応版）
+        # 表示範囲内のウィジェットを更新
+        # 連続したスクロールの場合、タイマーをリセットして最後のスクロール後に実行
+        if self.loading_timer:
+            self.loading_timer.stop()
 
-        Parameters
-        ----------
-        books : list
-            Book オブジェクトのリスト
-        """
-        # 書籍データを保存
-        self.all_books = books
-
-        # 列数を更新
-        self.update_grid_columns()
-
-        # 最初のバッチだけ即時表示
-        self.loaded_count = 0
-        self.load_more_books()
+        self.loading_timer = QTimer()
+        self.loading_timer.setSingleShot(True)
+        self.loading_timer.timeout.connect(self.update_visible_widgets)
+        self.loading_timer.start(100)  # 100ms後に実行（スクロール中は更新しない）
 
     def _clear_grid(self):
         """グリッドレイアウトをクリアする。"""
@@ -668,6 +712,7 @@ class LibraryGridView(QScrollArea):
         self.book_widgets = {}
         self.selected_book_ids = set()
         self.selected_book_id = None
+        self.visible_widgets = set()
 
     def _get_filtered_books(self):
         """
@@ -686,37 +731,6 @@ class LibraryGridView(QScrollArea):
             return self.library_controller.get_all_books(
                 category_id=self.category_filter
             )
-
-    def _populate_grid(self, books):
-        """
-        書籍をグリッドに配置する。
-
-        Parameters
-        ----------
-        books : list
-            Book オブジェクトのリスト
-        """
-        # グリッドのカラム数
-        columns = 4
-
-        # 書籍をグリッドに配置
-        for i, book in enumerate(books):
-            row = i // columns
-            col = i % columns
-
-            # 書籍ウィジェットを作成
-            book_widget = BookGridItemWidget(book)
-            book_widget.setFixedSize(150, 280)
-            book_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-            book_widget.mousePressEvent = (
-                lambda event, b=book.id: self._on_book_clicked(event, b)
-            )
-
-            # グリッドに追加
-            self.grid_layout.addWidget(book_widget, row, col)
-
-            # マップに追加
-            self.book_widgets[book.id] = book_widget
 
     def _on_book_clicked(self, event, book_id):
         """
@@ -826,7 +840,7 @@ class LibraryGridView(QScrollArea):
 
             menu.addSeparator()
 
-            # 一括ステータス変更
+            # 一括ステータス変更サブメニュー
             mark_action = QMenu("Mark Selected as", menu)
 
             unread_action = QAction("Unread", self)
@@ -959,6 +973,11 @@ class LibraryGridView(QScrollArea):
         self.book_widgets[book_id].setStyleSheet(
             "background-color: #e0e0ff; border: 1px solid #9090ff;"
         )
+
+        # 優先的に表紙を読み込む
+        widget = self.book_widgets[book_id]
+        if isinstance(widget, BookGridItemWidget) and not widget.cover_loaded:
+            QTimer.singleShot(10, widget.load_cover_image)
 
     def _deselect_book(self, book_id):
         """
@@ -1182,12 +1201,13 @@ class LibraryGridView(QScrollArea):
         """
         if book_id in self.book_widgets:
             # ローカルキャッシュをクリアせずにデータベースから最新の情報を取得
-            self.library_controller.db_manager.close()  # 念のため接続を閉じて再接続
             book = self.library_controller.get_book(book_id)
 
             if book:
                 # 書籍ウィジェットを更新
-                self.book_widgets[book_id].update_book_info(book)
+                widget = self.book_widgets[book_id]
+                if isinstance(widget, BookGridItemWidget):
+                    widget.update_book_info(book)
 
     def select_book(self, book_id, emit_signal=True):
         """
@@ -1247,32 +1267,6 @@ class LibraryGridView(QScrollArea):
 
         if self.selected_book_ids:
             self.books_selected.emit(list(self.selected_book_ids))
-
-    def eventFilter(self, obj, event):
-        """イベントフィルタでリサイズイベントを検知"""
-        if obj == self.viewport() and event.type() == QEvent.Type.Resize:
-            # ビューポートのリサイズ時に列数を再計算して更新
-            self.update_grid_columns()
-        return super().eventFilter(obj, event)
-
-    def update_grid_columns(self):
-        """ビューポートの幅に基づいて列数を計算"""
-        viewport_width = self.viewport().width()
-
-        # 書籍アイテムの幅 (固定幅 + マージン)
-        item_width = 180  # BookGridItemWidgetのfixedWidth(150) + マージン
-
-        # 利用可能な幅に基づいて列数を計算
-        available_width = viewport_width - 20  # スクロールバーや余白のための調整
-        new_columns = max(1, available_width // item_width)
-
-        # 列数が変わった場合のみ更新
-        if new_columns != self.grid_columns:
-            self.grid_columns = new_columns
-
-            # 表示中の場合、レイアウトを更新
-            if not self.is_loading and self.loaded_count > 0:
-                self.relayout_grid()
 
     def ensure_correct_layout(self):
         """現在のビューポートサイズに基づいて正しいレイアウトを確保する"""

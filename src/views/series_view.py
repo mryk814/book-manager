@@ -1,9 +1,10 @@
 import re
 
-from PyQt6.QtCore import QByteArray, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -45,6 +46,7 @@ class SeriesGridItemWidget(QWidget):
         super().__init__(parent)
 
         self.series = series
+        self.cover_loaded = False
 
         # レイアウトの設定
         layout = QVBoxLayout(self)
@@ -56,17 +58,12 @@ class SeriesGridItemWidget(QWidget):
         self.cover_label.setScaledContents(True)
         self.cover_label.setFrameShape(QFrame.Shape.Box)
 
-        # シリーズの代表的な表紙画像を取得または生成
-        cover_data = self.get_series_cover_image(series)
-        if cover_data:
-            pixmap = QPixmap()
-            pixmap.loadFromData(QByteArray(cover_data))
-            self.cover_label.setPixmap(pixmap)
-        else:
-            # デフォルト表紙
-            self.cover_label.setText("Series")
-            self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 初期状態ではプレースホルダー表示
+        self.cover_label.setText("Series")
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover_label.setStyleSheet("background-color: #f0f0f0;")
 
+        # 画像の読み込みは遅延させる
         layout.addWidget(self.cover_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # シリーズ名
@@ -126,6 +123,30 @@ class SeriesGridItemWidget(QWidget):
             return text[: max_length - 3] + "..."
         return text
 
+    def load_cover_image(self):
+        """シリーズの表紙画像を非同期で読み込む"""
+        if self.cover_loaded:
+            return
+
+        try:
+            # シリーズの代表的な表紙画像を取得
+            cover_data = self.get_series_cover_image(self.series)
+            if cover_data:
+                pixmap = QPixmap()
+                pixmap.loadFromData(QByteArray(cover_data))
+                self.cover_label.setPixmap(pixmap)
+                self.cover_loaded = True
+            else:
+                # デフォルト表紙
+                self.cover_label.setText("Series")
+                self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.cover_loaded = True  # 読み込み完了とマーク
+        except Exception as e:
+            print(f"Error loading series cover: {e}")
+            self.cover_label.setText("Series")
+            self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.cover_loaded = True  # エラーでも読み込み完了とマーク
+
     def get_series_cover_image(self, series):
         """
         シリーズの表紙画像を取得する。
@@ -157,7 +178,7 @@ class SeriesGridItemWidget(QWidget):
 
         if books:
             first_book = books[0]
-            return first_book.get_cover_image()
+            return first_book.get_cover_image(thumbnail_size=(150, 200))
         return None
 
     def update_series_info(self, series):
@@ -182,12 +203,25 @@ class SeriesGridItemWidget(QWidget):
         )
 
         # 読書進捗を更新
-        status_counts = series.get_reading_status()
-        total_books = sum(status_counts.values())
-        if total_books > 0 and hasattr(self, "progress_label"):
-            completed = status_counts.get(Book.STATUS_COMPLETED, 0)
-            progress = int(completed / total_books * 100)
-            self.progress_label.setText(f"Completed: {progress}%")
+        if hasattr(self, "progress_label"):
+            status_counts = series.get_reading_status()
+            total_books = sum(status_counts.values())
+            if total_books > 0:
+                completed = status_counts.get(Book.STATUS_COMPLETED, 0)
+                progress = int(completed / total_books * 100)
+                self.progress_label.setText(f"Completed: {progress}%")
+
+        # 表紙は再読み込み
+        self.cover_loaded = False
+        self.cover_label.setText("Series")
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        QTimer.singleShot(50, self.load_cover_image)
+
+    def enterEvent(self, event):
+        """ウィジェットにマウスが入ったとき、優先的に表紙を読み込む"""
+        if not self.cover_loaded:
+            QTimer.singleShot(10, self.load_cover_image)
+        super().enterEvent(event)
 
 
 class SeriesListItemWidget(QWidget):
@@ -379,14 +413,31 @@ class SeriesGridView(QScrollArea):
         # シリーズウィジェットのマップ
         self.series_widgets = {}
 
+        # 遅延ロード関連のプロパティ
+        self.all_series = []  # 全シリーズデータ
+        self.loaded_count = 0  # 読み込み済み件数
+        self.batch_size = 15  # 一度に読み込む件数
+        self.is_loading = False  # 読み込み中フラグ
+        self.loading_timer = None  # 読み込みタイマー
+        self.visible_widgets = set()  # 現在表示範囲内にあるウィジェット
+
         # グリッド列数とアイテムの標準サイズ
         self.grid_columns = 3  # デフォルト値
         # SeriesGridItemWidgetのsetFixedSizに合わせて調整
         self.item_width = 190
         self.last_viewport_width = 0  # 前回のビューポート幅を記録
 
-        # シリーズを読み込む
-        self.refresh()
+        # スクロールイベントを監視
+        self.verticalScrollBar().valueChanged.connect(self.check_scroll_position)
+
+        # 表示状態も監視（表示されたときに読み込みを最適化するため）
+        self.installEventFilter(self)
+
+        # 読み込み中のプレースホルダーを表示
+        self.placeholder = QLabel("Loading series...")
+        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
+        self.grid_layout.addWidget(self.placeholder, 0, 0)
 
     def resizeEvent(self, event):
         """ウィジェットのサイズが変わったときに呼ばれる"""
@@ -407,6 +458,13 @@ class SeriesGridView(QScrollArea):
         # シリーズがロードされている場合のみ再レイアウト
         if self.series_widgets:
             self.relayout_grid()
+
+    def eventFilter(self, obj, event):
+        """表示イベントをフィルタリングして、表示されたときに最適化する"""
+        if event.type() == QEvent.Type.Show:
+            # 表示されたときに一度だけスクロール位置をチェック
+            QTimer.singleShot(100, self.update_visible_widgets)
+        return super().eventFilter(obj, event)
 
     def calculate_grid_columns(self):
         """ビューポートの幅に基づいて列数を計算"""
@@ -448,27 +506,157 @@ class SeriesGridView(QScrollArea):
         # コンテンツウィジェットの更新を強制
         self.content_widget.updateGeometry()
 
+        # 表示範囲内のウィジェットを更新
+        QTimer.singleShot(50, self.update_visible_widgets)
+
     def refresh(self):
         """シリーズを再読み込みして表示を更新する。"""
         # グリッドをクリア
         self._clear_grid()
 
+        # 遅延ロード用の変数をリセット
+        self.loaded_count = 0
+
+        # 読み込み中表示
+        self.placeholder = QLabel("Loading series...")
+        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
+        self.grid_layout.addWidget(self.placeholder, 0, 0)
+
+        # 非同期でシリーズデータを取得
+        QTimer.singleShot(50, self._load_series_async)
+
+    def _load_series_async(self):
+        """シリーズデータを非同期で読み込む"""
         # シリーズを取得
-        series_list = self._get_filtered_series()
+        self.all_series = self._get_filtered_series()
+
+        # プレースホルダーを削除
+        if self.placeholder.parent() == self.content_widget:
+            self.placeholder.setParent(None)
+            self.placeholder.deleteLater()
 
         # 列数を計算
         self.calculate_grid_columns()
 
-        # グリッドに配置
-        self._populate_grid(series_list)
+        # 最初のバッチをロード
+        self.load_more_series()
 
-        # タイマーで少し遅らせて確実にレイアウトを更新
-        QTimer.singleShot(50, self.ensure_correct_layout)
+    def load_more_series(self):
+        """追加のシリーズを読み込む"""
+        if self.is_loading or self.loaded_count >= len(self.all_series):
+            return
 
-    def ensure_correct_layout(self):
-        """現在のビューポートサイズに基づいて正しいレイアウトを確保する"""
-        if self.calculate_grid_columns() and self.series_widgets:
-            self.relayout_grid()
+        self.is_loading = True
+
+        # 次のバッチのインデックス範囲を計算
+        start_idx = self.loaded_count
+        end_idx = min(start_idx + self.batch_size, len(self.all_series))
+
+        # 自然順ソート（シリーズ名の中の数字を考慮）
+        def natural_sort_key(series):
+            name = series.name if series.name else ""
+            return [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", name)
+            ]
+
+        sorted_series = sorted(self.all_series, key=natural_sort_key)
+
+        # シリーズをグリッドに配置
+        for i in range(start_idx, end_idx):
+            if i >= len(sorted_series):
+                break
+
+            series = sorted_series[i]
+            row = i // self.grid_columns
+            col = i % self.grid_columns
+
+            # シリーズウィジェットを作成
+            series_widget = SeriesGridItemWidget(series)
+            # ここでのサイズがitem_widthと一致することを確認
+            series_widget.setFixedSize(190, 300)
+            series_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+            series_widget.mousePressEvent = (
+                lambda event, s=series.id: self._on_series_clicked(event, s)
+            )
+
+            # グリッドに追加
+            self.grid_layout.addWidget(series_widget, row, col)
+
+            # マップに追加
+            self.series_widgets[series.id] = series_widget
+
+        # 読み込み済み件数を更新
+        self.loaded_count = end_idx
+
+        # 読み込み中フラグをリセット
+        self.is_loading = False
+
+        # すべてのシリーズを読み込んだか確認
+        if self.loaded_count < len(self.all_series):
+            # まだ未読込のシリーズがあればステータスメッセージを更新
+            try:
+                main_window = self.window()
+                if main_window and hasattr(main_window, "statusBar"):
+                    main_window.statusBar.showMessage(
+                        f"Loaded {self.loaded_count} of {len(self.all_series)} series"
+                    )
+            except Exception as e:
+                # ステータスバー更新でエラーが発生しても処理を続行
+                print(f"Error updating status bar: {e}")
+
+        # 表示範囲内のウィジェットの表紙を読み込む
+        QTimer.singleShot(50, self.update_visible_widgets)
+
+    def update_visible_widgets(self):
+        """現在表示範囲内にあるウィジェットを特定し、表紙画像を優先的に読み込む"""
+        if not self.series_widgets:
+            return
+
+        # スクロール領域の表示範囲を取得
+        viewport_rect = self.viewport().rect()
+        scrollbar_value = self.verticalScrollBar().value()
+
+        # 表示範囲を調整（スクロール位置を考慮）
+        visible_top = scrollbar_value
+        visible_bottom = scrollbar_value + viewport_rect.height()
+
+        # 表示範囲内のウィジェットを特定
+        new_visible_widgets = set()
+
+        for series_id, widget in self.series_widgets.items():
+            widget_pos = widget.mapTo(self.content_widget, QPoint(0, 0))
+            widget_top = widget_pos.y()
+            widget_bottom = widget_top + widget.height()
+
+            # ウィジェットが表示範囲内にあるか判定
+            if widget_bottom >= visible_top and widget_top <= visible_bottom:
+                new_visible_widgets.add(series_id)
+
+                # まだ表紙が読み込まれていなければ読み込む
+                if isinstance(widget, SeriesGridItemWidget) and not widget.cover_loaded:
+                    # 非同期で表紙を読み込む
+                    QTimer.singleShot(10, widget.load_cover_image)
+
+        # 表示ウィジェットセットを更新
+        self.visible_widgets = new_visible_widgets
+
+    def check_scroll_position(self, value):
+        """スクロール位置をチェックして、必要なら追加のシリーズを読み込む"""
+        # スクロールが下部に近づいたら追加読み込み
+        scrollbar = self.verticalScrollBar()
+        if value > scrollbar.maximum() * 0.7:  # 70%以上スクロールしたら
+            self.load_more_series()
+
+        # 表示範囲内のウィジェットを更新
+        # 連続したスクロールの場合、タイマーをリセットして最後のスクロール後に実行
+        if self.loading_timer:
+            self.loading_timer.stop()
+
+        self.loading_timer = QTimer()
+        self.loading_timer.setSingleShot(True)
+        self.loading_timer.timeout.connect(self.update_visible_widgets)
+        self.loading_timer.start(100)  # 100ms後に実行（スクロール中は更新しない）
 
     def _clear_grid(self):
         """グリッドレイアウトをクリアする。"""
@@ -480,6 +668,8 @@ class SeriesGridView(QScrollArea):
                 widget.deleteLater()
 
         self.series_widgets = {}
+        self.selected_series_id = None
+        self.visible_widgets = set()
 
     def _get_filtered_series(self):
         """
@@ -517,45 +707,6 @@ class SeriesGridView(QScrollArea):
 
         return series_list
 
-    def _populate_grid(self, series_list):
-        """
-        シリーズをグリッドに配置する。
-
-        Parameters
-        ----------
-        series_list : list
-            Series オブジェクトのリスト
-        """
-
-        # 自然順ソート（シリーズ名の中の数字を考慮）
-        def natural_sort_key(series):
-            name = series.name if series.name else ""
-            return [
-                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", name)
-            ]
-
-        sorted_series = sorted(series_list, key=natural_sort_key)
-
-        # シリーズをグリッドに配置
-        for i, series in enumerate(sorted_series):
-            row = i // self.grid_columns
-            col = i % self.grid_columns
-
-            # シリーズウィジェットを作成
-            series_widget = SeriesGridItemWidget(series)
-            # ここでのサイズがitem_widthと一致することを確認
-            series_widget.setFixedSize(190, 300)
-            series_widget.setCursor(Qt.CursorShape.PointingHandCursor)
-            series_widget.mousePressEvent = (
-                lambda event, s=series.id: self._on_series_clicked(event, s)
-            )
-
-            # グリッドに追加
-            self.grid_layout.addWidget(series_widget, row, col)
-
-            # マップに追加
-            self.series_widgets[series.id] = series_widget
-
     def _on_series_clicked(self, event, series_id):
         """
         シリーズクリック時の処理。
@@ -586,6 +737,11 @@ class SeriesGridView(QScrollArea):
 
         # 選択シグナルを発火
         self.series_selected.emit(series_id)
+
+        # 優先的に表紙を読み込む
+        widget = self.series_widgets[series_id]
+        if isinstance(widget, SeriesGridItemWidget) and not widget.cover_loaded:
+            QTimer.singleShot(10, widget.load_cover_image)
 
     def _show_context_menu(self, position, series_id):
         """
@@ -695,7 +851,9 @@ class SeriesGridView(QScrollArea):
             series = self.library_controller.get_series(series_id)
             if series:
                 # シリーズウィジェットを更新
-                self.series_widgets[series_id].update_series_info(series)
+                widget = self.series_widgets[series_id]
+                if isinstance(widget, SeriesGridItemWidget):
+                    widget.update_series_info(series)
 
     def select_series(self, series_id, emit_signal=True):
         """
@@ -726,6 +884,11 @@ class SeriesGridView(QScrollArea):
         if emit_signal:
             self.series_selected.emit(series_id)
 
+        # 優先的に表紙を読み込む
+        widget = self.series_widgets[series_id]
+        if isinstance(widget, SeriesGridItemWidget) and not widget.cover_loaded:
+            QTimer.singleShot(10, widget.load_cover_image)
+
     def get_selected_series_id(self):
         """
         現在選択されているシリーズIDを取得する。
@@ -736,6 +899,11 @@ class SeriesGridView(QScrollArea):
             選択されているシリーズID、もしくは選択がない場合はNone
         """
         return self.selected_series_id
+
+    def ensure_correct_layout(self):
+        """現在のビューポートサイズに基づいて正しいレイアウトを確保する"""
+        if self.calculate_grid_columns() and self.series_widgets:
+            self.relayout_grid()
 
 
 class SeriesListView(QWidget):

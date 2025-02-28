@@ -893,9 +893,6 @@ class MetadataEditor(QDialog):
             "category_id": category_id,  # カテゴリIDを追加
         }
 
-        # デバッグ出力 - デバッグを容易にするため
-        print(f"Updating book {self.book_id} with metadata: {metadata_updates}")
-
         # カスタムメタデータを追加
         for key, edit in self.custom_editors.items():
             metadata_updates[key] = edit.text().strip()

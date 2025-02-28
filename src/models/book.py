@@ -456,9 +456,6 @@ class Book:
         standard_updates = {k: v for k, v in kwargs.items() if k in standard_fields}
         custom_updates = {k: v for k, v in kwargs.items() if k not in standard_fields}
 
-        # デバッグ情報
-        print(f"Updating book {self.id} standard fields: {standard_updates}")
-
         success = True
 
         # 標準フィールドの更新

@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
 
         # ウィンドウの基本設定
         self.setWindowTitle("PDF Library Manager")
-        self.setMinimumSize(1024, 768)
+        self.setMinimumSize(1920, 1080)
 
         # メインウィジェットとレイアウトの設定
         self.central_widget = QWidget()
@@ -104,6 +104,17 @@ class MainWindow(QMainWindow):
 
         # スプリッターの初期サイズを設定
         self.main_splitter.setSizes([300, 700])
+
+        # スプリッターハンドルのストレッチファクタを設定
+        # 0: 左側のウィジェットは固定サイズ、1: 右側のウィジェットが伸縮
+        self.main_splitter.setStretchFactor(0, 0)  # 左側は固定
+        self.main_splitter.setStretchFactor(1, 1)  # 右側は伸縮
+
+        # スプリッターハンドル移動時に左側のサイズを記憶
+        self.main_splitter.splitterMoved.connect(self.on_splitter_moved)
+
+        # 記憶された左側サイズ（初期値）
+        self.left_panel_width = 300
 
         # ステータスバーの設定
         self.statusBar = QStatusBar()
@@ -1842,4 +1853,23 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(
                 self, "Error", f"Failed to open database inspector: {e}"
+            )
+
+    def on_splitter_moved(self, pos, index):
+        """スプリッターハンドルが動いた時に左側のサイズを記憶する"""
+        if index == 1:  # 最初のスプリッターハンドル
+            self.left_panel_width = pos
+
+    def resizeEvent(self, event):
+        """ウィンドウサイズ変更時のイベント"""
+        # スーパークラスの処理を呼び出し
+        super().resizeEvent(event)
+
+        # メインスプリッターの幅を取得
+        splitter_width = self.main_splitter.width()
+
+        if splitter_width > self.left_panel_width + 100:
+            # サイズの再設定（左側は記憶されたサイズ、右側は残り全部）
+            self.main_splitter.setSizes(
+                [self.left_panel_width, splitter_width - self.left_panel_width]
             )

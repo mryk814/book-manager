@@ -355,9 +355,19 @@ class Book:
             更新が成功したかどうか
         """
         # 標準フィールドとカスタムフィールドを分離
-        standard_fields = {"title", "author", "publisher", "series_id", "series_order"}
+        standard_fields = {
+            "title",
+            "author",
+            "publisher",
+            "series_id",
+            "series_order",
+            "category_id",
+        }
         standard_updates = {k: v for k, v in kwargs.items() if k in standard_fields}
         custom_updates = {k: v for k, v in kwargs.items() if k not in standard_fields}
+
+        # デバッグ情報
+        print(f"Updating book {self.id} standard fields: {standard_updates}")
 
         success = True
 

@@ -117,6 +117,9 @@ class DatabaseManager:
 
         conn.commit()
 
+        # テーブルのマイグレーションを呼び出す
+        self.migrate_database()
+
     def add_book(
         self,
         title,
@@ -241,6 +244,7 @@ class DatabaseManager:
             "title",
             "series_id",
             "series_order",
+            "category_id",  # 追加: category_id を許可フィールドに追加
             "author",
             "publisher",
             "cover_image",
@@ -258,10 +262,10 @@ class DatabaseManager:
 
         cursor.execute(
             f"""
-        UPDATE books 
-        SET {set_clause}
-        WHERE id = ?
-        """,
+            UPDATE books 
+            SET {set_clause}
+            WHERE id = ?
+            """,
             values,
         )
 
@@ -532,6 +536,9 @@ class DatabaseManager:
         dict または None
             カテゴリ情報の辞書、もしくは見つからない場合はNone
         """
+        if not category_id:
+            return None
+
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -853,14 +860,20 @@ class DatabaseManager:
             columns = [col[1] for col in cursor.fetchall()]
 
             if "category_id" not in columns:
+                print("Migrating database: Adding category_id column to books table...")
                 # category_id カラムを追加
                 cursor.execute("""
                 ALTER TABLE books ADD COLUMN category_id INTEGER 
                 REFERENCES categories(id)
                 """)
                 conn.commit()
-                print("Migrated: Added category_id column to books table")
+                print("Migration successful: Added category_id column to books table")
+            else:
+                print(
+                    "Migration not needed: category_id column already exists in books table"
+                )
 
         except Exception as e:
             print(f"Migration error: {e}")
             conn.rollback()
+            raise

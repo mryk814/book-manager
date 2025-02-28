@@ -146,10 +146,14 @@ def main():
     if db_dir:  # ディレクトリパスが空でない場合のみ作成
         os.makedirs(db_dir, exist_ok=True)
 
-    # データベースマイグレーションを実行
-    db_manager = DatabaseManager(db_path)
-    db_manager.migrate_database()
-    db_manager.close()
+    # データベースマイグレーションを実行 - ここを追加
+    try:
+        temp_db_manager = DatabaseManager(db_path)
+        temp_db_manager.migrate_database()
+        temp_db_manager.close()
+        logging.info("Database migration completed successfully")
+    except Exception as e:
+        logging.error(f"Database migration failed: {e}")
 
     # メインウィンドウを作成
     window = MainWindow(db_path)

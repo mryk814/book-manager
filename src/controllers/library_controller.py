@@ -406,9 +406,34 @@ class LibraryController:
         bool
             更新が成功したかどうか
         """
+        # デバッグ: 更新前の書籍データを確認
+        old_book = self.get_book(book_id)
+        print(f"Before update - Book {book_id}: category_id={old_book.category_id}")
+
         book = self.get_book(book_id)
         if book:
-            return book.update_metadata(**metadata)
+            # 更新を実行
+            success = book.update_metadata(**metadata)
+
+            # デバッグ: 更新後のデータベースの状態を直接確認
+            if success:
+                # データベースから直接クエリで確認
+                conn = self.db_manager.connect()
+                cursor = conn.cursor()
+                cursor.execute("SELECT category_id FROM books WHERE id = ?", (book_id,))
+                result = cursor.fetchone()
+                if result:
+                    print(
+                        f"Database after update - Book {book_id}: category_id={result['category_id']}"
+                    )
+
+                # 更新後の書籍オブジェクトを取得して確認
+                updated_book = self.get_book(book_id)
+                print(
+                    f"Updated book object - Book {book_id}: category_id={updated_book.category_id}"
+                )
+
+            return success
         return False
 
     def batch_update_metadata(self, book_ids, **metadata):

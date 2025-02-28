@@ -417,6 +417,14 @@ class MainWindow(QMainWindow):
         # ヘルプメニュー
         help_menu = self.menuBar().addMenu("&Help")
 
+        debug_menu = QMenu("&Debug", self)
+        help_menu.addMenu(debug_menu)
+
+        # データベース検査ツール
+        db_inspector_action = QAction("&Database Inspector", self)
+        db_inspector_action.triggered.connect(self.show_db_inspector)
+        debug_menu.addAction(db_inspector_action)
+
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
@@ -628,13 +636,17 @@ class MainWindow(QMainWindow):
 
     def on_book_selected(self, book_id):
         """
-        書籍が選択されたときの処理。
+        書籍が選択されたときの処理（単一選択）。
 
         Parameters
         ----------
         book_id : int
             選択された書籍のID
         """
+        # 複数選択モードを無効化
+        if self.multi_select_action.isChecked():
+            self.toggle_multi_select_mode(False)
+
         # メタデータ編集アクションを有効化
         self.edit_metadata_action.setEnabled(True)
 
@@ -957,44 +969,6 @@ class MainWindow(QMainWindow):
         current_view = self.library_tabs.currentWidget()
         if current_view:
             current_view.select_all()
-
-    def on_book_selected(self, book_id):
-        """
-        書籍が選択されたときの処理（単一選択）。
-
-        Parameters
-        ----------
-        book_id : int
-            選択された書籍のID
-        """
-        # 複数選択モードを無効化
-        if self.multi_select_action.isChecked():
-            self.toggle_multi_select_mode(False)
-
-        # メタデータ編集アクションを有効化
-        self.edit_metadata_action.setEnabled(True)
-
-        # リーダービューに書籍を読み込む
-        success = self.reader_view.load_book(book_id)
-
-        if success:
-            # 選択状態をビュー間で同期
-            if self.sender() == self.grid_view:
-                self.list_view.select_book(book_id, emit_signal=False)
-            elif self.sender() == self.list_view:
-                self.grid_view.select_book(book_id, emit_signal=False)
-
-            # book_openedシグナルを発火
-            self.book_opened.emit(book_id)
-
-            # 書籍の情報をステータスバーに表示
-            book = self.library_controller.get_book(book_id)
-            if book:
-                self.statusBar.showMessage(
-                    f"Opened: {book.title} by {book.author or 'Unknown'}"
-                )
-        else:
-            self.statusBar.showMessage("Failed to open book")
 
     def on_books_selected(self, book_ids):
         """
@@ -1806,21 +1780,6 @@ class MainWindow(QMainWindow):
             # シリーズに属する書籍だけを表示
             self.list_view._populate_list(books)
 
-    def show_series_view(self):
-        """シリーズビューに戻る"""
-        # ナビゲーションバーを更新
-        self.back_to_series_button.setVisible(False)
-        self.current_series_label.setText("")
-
-        # フィルタモードを解除
-        self.in_series_filtered_mode = False
-
-        # シリーズタブに切り替え
-        self.main_tabs.setCurrentWidget(self.series_tab)
-
-        # ステータスバーのメッセージ更新
-        self.statusBar.showMessage("Showing series view")
-
     def refresh_books_view(self):
         """書籍ビューを現在の状態に応じてリフレッシュする"""
         if self.in_series_filtered_mode and self.current_series_id:
@@ -1872,3 +1831,15 @@ class MainWindow(QMainWindow):
             self.statusBar.showMessage("Showing all categories")
         else:
             self.statusBar.showMessage(f"Filtered by category: {category_name}")
+
+    def show_db_inspector(self):
+        """データベース検査ツールを表示する。"""
+        try:
+            from views.dialogs.db_inspector import DatabaseInspector
+
+            dialog = DatabaseInspector(self.db_manager, self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"Failed to open database inspector: {e}"
+            )

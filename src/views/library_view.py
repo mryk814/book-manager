@@ -91,9 +91,10 @@ class BookListItemWidget(QWidget):
                     series_text += f" #{book.series_order}"
                 self.series_label = QLabel(series_text)
                 info_layout.addWidget(self.series_label)
-        # シリーズ情報の後にカテゴリ情報を追加
+        # カテゴリ情報
         if book.category_id:
             self.category_label = QLabel(f"Category: {book.category_name}")
+            self.category_label.setStyleSheet("color: green;")
             info_layout.addWidget(self.category_label)
         elif book.series_id and book.db_manager.get_series(book.series_id).get(
             "category_id"
@@ -1097,8 +1098,16 @@ class LibraryGridView(QScrollArea):
             更新する書籍ID
         """
         if book_id in self.book_widgets:
+            # ローカルキャッシュをクリアせずにデータベースから最新の情報を取得
+            self.library_controller.db_manager.close()  # 念のため接続を閉じて再接続
             book = self.library_controller.get_book(book_id)
+
             if book:
+                # デバッグ: 更新する書籍の情報を出力
+                print(
+                    f"Updating UI for book {book_id}: category_id={book.category_id}, category_name={book.category_name}"
+                )
+
                 # 書籍ウィジェットを更新
                 self.book_widgets[book_id].update_book_info(book)
 

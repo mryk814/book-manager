@@ -866,6 +866,9 @@ class MetadataEditor(QDialog):
         author = self.author_edit.text().strip()
         publisher = self.publisher_edit.text().strip()
 
+        # カテゴリを取得 - この部分があることを確認
+        category_id = self.category_combo.currentData()
+
         # 読書状態を取得
         status_map = {
             "Unread": self.book.STATUS_UNREAD,
@@ -887,18 +890,27 @@ class MetadataEditor(QDialog):
             "publisher": publisher,
             "series_id": series_id,
             "series_order": series_order,
+            "category_id": category_id,  # カテゴリIDを追加
         }
+
+        # デバッグ出力 - デバッグを容易にするため
+        print(f"Updating book {self.book_id} with metadata: {metadata_updates}")
 
         # カスタムメタデータを追加
         for key, edit in self.custom_editors.items():
             metadata_updates[key] = edit.text().strip()
 
         # 書籍のメタデータを更新
-        self.library_controller.update_book_metadata(self.book_id, **metadata_updates)
+        success = self.library_controller.update_book_metadata(
+            self.book_id, **metadata_updates
+        )
+
+        if success:
+            print(
+                f"Successfully updated book {self.book_id} with category_id: {category_id}"
+            )
+        else:
+            print(f"Failed to update book {self.book_id}")
 
         # 読書状態を更新
         self.library_controller.update_book_progress(self.book_id, status=status)
-
-        # カテゴリ情報を取得
-        category_id = self.category_combo.currentData()
-        metadata_updates["category_id"] = category_id

@@ -237,6 +237,13 @@ class BookGridItemWidget(QWidget):
         self.book = book
         self.cover_loaded = False
 
+        # スタイルシートのインポート
+        from utils.styles import StyleSheets
+        from utils.theme import AppTheme
+
+        # 基本スタイルを適用
+        self.setStyleSheet(StyleSheets.GRID_ITEM_BASE)
+
         # レイアウト設定
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)  # 内部マージンを少し広げる
@@ -256,7 +263,7 @@ class BookGridItemWidget(QWidget):
         # 初期状態ではプレースホルダー表示
         self.cover_label.setText("Loading...")
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover_label.setStyleSheet("background-color: #f0f0f0;")
+        self.cover_label.setStyleSheet(StyleSheets.PLACEHOLDER)
 
         # 画像読み込みは遅延実行する（初回表示時）
         # 明示的なロード要求まで読み込みを遅延させる
@@ -295,7 +302,7 @@ class BookGridItemWidget(QWidget):
                     )
                     layout.addWidget(self.category_label)
 
-        # 読書状態（アイコンまたはテキスト）
+        # 読書状態
         status_text = "Unread"
         if book.status == Book.STATUS_READING:
             progress = (
@@ -306,11 +313,8 @@ class BookGridItemWidget(QWidget):
             status_text = f"Reading {progress}%"
         elif book.status == Book.STATUS_COMPLETED:
             status_text = "Completed"
-
         self.status_label = QLabel(status_text)
-        self.status_label.setStyleSheet(
-            f"color: {self._get_status_color(book.status)};"
-        )
+        self.status_label.setStyleSheet(StyleSheets.reading_status_style(book.status))
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)
 
@@ -327,6 +331,7 @@ class BookGridItemWidget(QWidget):
                     "background-color: #e0e0e0; border-radius: 3px; padding: 2px;"
                 )
                 self.series_badge.setToolTip(series_text)
+                self.series_badge.setStyleSheet(StyleSheets.SERIES_BADGE)
                 layout.addWidget(self.series_badge)
 
     def _truncate_text(self, text, max_length):
@@ -1079,6 +1084,8 @@ class LibraryGridView(QScrollArea):
         add_to_selection : bool
             既存の選択に追加するかどうか
         """
+        from utils.styles import StyleSheets
+
         if book_id not in self.book_widgets:
             return
 
@@ -1087,9 +1094,7 @@ class LibraryGridView(QScrollArea):
 
         # 選択状態を設定
         self.selected_book_ids.add(book_id)
-        self.book_widgets[book_id].setStyleSheet(
-            "background-color: #e0e0ff; border: 1px solid #9090ff;"
-        )
+        self.book_widgets[book_id].setStyleSheet(StyleSheets.GRID_ITEM_SELECTED)
 
         # 優先的に表紙を読み込む
         widget = self.book_widgets[book_id]

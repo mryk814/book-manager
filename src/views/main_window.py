@@ -201,6 +201,18 @@ class MainWindow(QMainWindow):
         self.default_sort_by = "title"
         self.default_sort_order = "asc"
 
+        # スタイルシートのインポート
+        from utils.styles import StyleSheets
+
+        # メインウィンドウにスタイルを適用
+        self.setStyleSheet(StyleSheets.MAIN_WINDOW)
+
+        # ツールバーにスタイルを適用
+        self.toolbar.setStyleSheet(StyleSheets.TOOLBAR)
+
+        # ステータスバーにスタイルを適用
+        self.statusBar.setStyleSheet(StyleSheets.STATUSBAR)
+
         # ウィンドウ表示後に少し遅らせて設定を再適用
         QTimer.singleShot(100, self.apply_window_settings)
 

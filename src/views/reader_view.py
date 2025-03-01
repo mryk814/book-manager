@@ -1,6 +1,15 @@
 import fitz  # PyMuPDF
 from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QImage, QPainter, QPixmap, QTransform
+from PyQt6.QtGui import (
+    QAction,
+    QColor,
+    QIcon,
+    QImage,
+    QPainter,
+    QPalette,
+    QPixmap,
+    QTransform,
+)
 from PyQt6.QtWidgets import (
     QComboBox,
     QGraphicsScene,
@@ -123,6 +132,8 @@ class PDFReaderView(QWidget):
 
     def setup_statusbar(self):
         """ステータスバーを設定する。"""
+        from utils.styles import StyleSheets
+
         self.statusbar = QWidget()
         self.statusbar_layout = QHBoxLayout(self.statusbar)
         self.statusbar_layout.setContentsMargins(5, 0, 5, 0)
@@ -134,6 +145,7 @@ class PDFReaderView(QWidget):
         self.progress_slider.setValue(0)
         self.progress_slider.setEnabled(False)
         self.progress_slider.valueChanged.connect(self.on_slider_value_changed)
+        self.progress_slider.setStyleSheet(StyleSheets.PROGRESS_BAR)
         self.statusbar_layout.addWidget(self.progress_slider)
 
         # 読書状態ラベル
@@ -144,6 +156,8 @@ class PDFReaderView(QWidget):
 
     def setup_viewer(self):
         """PDF表示領域を設定する。"""
+        from utils.theme import AppTheme
+
         # スクロール可能なビュー
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -153,7 +167,8 @@ class PDFReaderView(QWidget):
         self.graphics_view = QGraphicsView()
         self.graphics_view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.graphics_view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        self.graphics_view.setBackgroundBrush(Qt.GlobalColor.lightGray)
+        # Qt.GlobalColor.lightGrayの代わりにテーマカラーを使用
+        self.graphics_view.setBackgroundBrush(QColor(AppTheme.BACKGROUND_ALT))
         self.graphics_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.graphics_view.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding

@@ -197,6 +197,25 @@ class MainWindow(QMainWindow):
         # 設定からグリッドビューの列数などを読み込み
         self.load_grid_view_settings()
 
+        # ウィンドウ表示後に少し遅らせて設定を再適用
+        QTimer.singleShot(100, self.apply_window_settings)
+
+    def apply_window_settings(self):
+        """ウィンドウ設定を再適用する"""
+        settings = QSettings("YourOrg", "PDFLibraryManager")
+
+        # サイズを再度明示的に設定
+        size = settings.value("window/size")
+        if size:
+            try:
+                if isinstance(size, str):
+                    width, height = map(int, size.strip("()").split(","))
+                    self.resize(width, height)
+                else:
+                    self.resize(size)
+            except (ValueError, TypeError):
+                pass
+
     def configure_window_for_display(self):
         """ディスプレイサイズに合わせてウィンドウサイズを設定"""
         screen = QApplication.primaryScreen().availableGeometry()
@@ -301,6 +320,7 @@ class MainWindow(QMainWindow):
     def setup_toolbar(self):
         """ツールバーを設定する。"""
         self.toolbar = QToolBar("Main Toolbar")
+        self.toolbar.setObjectName("mainToolbar")
         self.toolbar.setIconSize(QSize(24, 24))
         self.addToolBar(self.toolbar)
 
@@ -2116,8 +2136,12 @@ class MainWindow(QMainWindow):
         """現在のアプリケーション状態を保存する。"""
         settings = QSettings("YourOrg", "PDFLibraryManager")
 
-        # ウィンドウのジオメトリとステートを保存
+        # ウィンドウのジオメトリを保存
         settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/size", self.size())  # サイズも明示的に保存
+        settings.setValue("window/pos", self.pos())  # 位置も明示的に保存
+
+        # ウィンドウのステートを保存
         settings.setValue("window/state", self.saveState())
 
         # スプリッター位置
@@ -2145,19 +2169,46 @@ class MainWindow(QMainWindow):
         """保存されたアプリケーション状態を復元する。"""
         settings = QSettings("YourOrg", "PDFLibraryManager")
 
-        # ウィンドウのジオメトリとステートを復元
+        # ウィンドウのジオメトリを復元
         geometry = settings.value("window/geometry")
         if geometry:
             self.restoreGeometry(geometry)
+
+        # サイズと位置を明示的に復元する追加のコード
+        size = settings.value("window/size")
+        pos = settings.value("window/pos")
+
+        if size and pos:
+            # QSize と QPoint に変換
+            try:
+                if isinstance(size, str):
+                    # コンマで区切られた文字列の場合（QSettings の実装による）
+                    width, height = map(int, size.strip("()").split(","))
+                    self.resize(width, height)
+                else:
+                    self.resize(size)
+
+                if isinstance(pos, str):
+                    x, y = map(int, pos.strip("()").split(","))
+                    self.move(x, y)
+                else:
+                    self.move(pos)
+            except (ValueError, TypeError):
+                print("Failed to restore window size/position, using defaults")
 
         state = settings.value("window/state")
         if state:
             self.restoreState(state)
 
-        # スプリッター位置
+        # スプリッター位置 - 文字列から整数に変換
         splitter_sizes = settings.value("splitter/sizes")
         if splitter_sizes:
-            self.main_splitter.setSizes(splitter_sizes)
+            try:
+                # 文字列リストを整数リストに変換
+                int_sizes = [int(size) for size in splitter_sizes]
+                self.main_splitter.setSizes(int_sizes)
+            except (TypeError, ValueError):
+                print("Failed to convert splitter sizes to integers")
 
         # タブとビュー状態（非同期にしてデータロード後に適用）
         self.pending_ui_restore = {

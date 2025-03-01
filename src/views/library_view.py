@@ -496,6 +496,7 @@ class LibraryGridView(QScrollArea):
 
         # フィルタ設定
         self.category_filter = None
+        self.status_filter = None
         self.search_query = None
 
         # 書籍ウィジェットのマップ
@@ -798,12 +799,14 @@ class LibraryGridView(QScrollArea):
         """
         if self.search_query:
             # 検索クエリがある場合は検索結果を返す
-            return self.library_controller.search_books(self.search_query)
+            base_books = self.library_controller.search_books(self.search_query)
         else:
-            # カテゴリフィルタがある場合はそれを適用
-            return self.library_controller.get_all_books(
-                category_id=self.category_filter
+            # カテゴリフィルタとステータスフィルタを適用
+            base_books = self.library_controller.get_all_books(
+                category_id=self.category_filter, status=self.status_filter
             )
+
+        return base_books
 
     def _on_book_clicked(self, event, book_id):
         """
@@ -867,6 +870,19 @@ class LibraryGridView(QScrollArea):
             self._select_book(book_id)
             self.selected_book_id = book_id
             self.book_selected.emit(book_id)
+
+    def set_status_filter(self, status):
+        """
+        読書状態フィルタを設定する。
+
+        Parameters
+        ----------
+        status : str または None
+            フィルタリングする読書状態、またはNone（すべて表示）
+        """
+        self.status_filter = status
+        self.search_query = None  # 検索クエリをクリア
+        self.refresh()
 
     def _show_context_menu(self, position, book_id):
         """
@@ -1037,7 +1053,7 @@ class LibraryGridView(QScrollArea):
         self.all_books = books
 
         # 列数を更新
-        self.update_grid_columns()
+        self.calculate_grid_columns()
 
         # 最初のバッチだけ即時表示
         self.loaded_count = 0
@@ -1426,6 +1442,7 @@ class LibraryListView(QWidget):
 
         # フィルタ設定
         self.category_filter = None
+        self.status_filter = None
         self.search_query = None
 
         # 遅延ロード関連のプロパティ
@@ -2056,3 +2073,36 @@ class LibraryListView(QWidget):
         selected_ids = self.get_selected_book_ids()
         if selected_ids:
             self.books_selected.emit(selected_ids)
+
+    def _get_filtered_books(self):
+        """
+        フィルタ条件に基づいて書籍のリストを取得する。
+
+        Returns
+        -------
+        list
+            Book オブジェクトのリスト
+        """
+        if self.search_query:
+            # 検索クエリがある場合は検索結果を返す
+            base_books = self.library_controller.search_books(self.search_query)
+        else:
+            # カテゴリフィルタとステータスフィルタを適用
+            base_books = self.library_controller.get_all_books(
+                category_id=self.category_filter, status=self.status_filter
+            )
+
+        return base_books
+
+    def set_status_filter(self, status):
+        """
+        読書状態フィルタを設定する。
+
+        Parameters
+        ----------
+        status : str または None
+            フィルタリングする読書状態、またはNone（すべて表示）
+        """
+        self.status_filter = status
+        self.search_query = None  # 検索クエリをクリア
+        self.refresh()

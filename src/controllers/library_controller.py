@@ -55,10 +55,14 @@ class LibraryController:
         if series_id:
             # シリーズIDが指定されている場合は、そのシリーズの書籍のみを取得
             book_data_list = self.db_manager.get_books_in_series(series_id)
+
+            # ステータスフィルタが指定されている場合はさらにフィルタリング
+            if status:
+                book_data_list = [
+                    book for book in book_data_list if book.get("status") == status
+                ]
         elif category_id:
             # カテゴリIDが指定されている場合
-            # 1. そのカテゴリに直接属する書籍を取得
-            # 2. そのカテゴリに属するシリーズの書籍を取得
             book_data_list = self.db_manager.get_books_by_category(
                 category_id, **query_params
             )

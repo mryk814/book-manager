@@ -188,6 +188,9 @@ class MainWindow(QMainWindow):
         # 非同期でデータをロード
         QTimer.singleShot(50, self.async_initialize_data)
 
+        # 設定からウィンドウ状態を復元
+        self.restore_window_state()
+
         # ウィンドウサイズを調整するメソッドを追加
         self.configure_window_for_display()
 
@@ -406,6 +409,23 @@ class MainWindow(QMainWindow):
         self.clear_category_filter_button.clicked.connect(self.clear_category_filter)
         self.toolbar.addWidget(self.clear_category_filter_button)
 
+        self.toolbar.addSeparator()
+
+        # 読書状態フィルタ
+        self.status_label = QLabel("Status:")
+        self.toolbar.addWidget(self.status_label)
+
+        self.status_combo = QComboBox()
+        self.status_combo.addItem("All Statuses", None)
+        self.status_combo.addItem("Unread", Book.STATUS_UNREAD)
+        self.status_combo.addItem("Reading", Book.STATUS_READING)
+        self.status_combo.addItem("Completed", Book.STATUS_COMPLETED)
+        self.status_combo.currentIndexChanged.connect(self.filter_by_status)
+        self.toolbar.addWidget(self.status_combo)
+
+        self.clear_status_filter_button = QPushButton("Clear")
+        self.clear_status_filter_button.clicked.connect(self.clear_status_filter)
+        self.toolbar.addWidget(self.clear_status_filter_button)
         self.toolbar.addSeparator()
 
         # 検索ボックス
@@ -798,6 +818,7 @@ class MainWindow(QMainWindow):
     def clear_category_filter(self):
         """カテゴリフィルタをクリアする。"""
         self.category_combo.setCurrentIndex(0)  # 「All Categories」を選択
+        self.update_filter_status()  # フィルター状態表示を更新
 
     def clear_search(self):
         """検索をクリアし、すべての書籍を表示する。"""
@@ -1098,7 +1119,10 @@ class MainWindow(QMainWindow):
         event : QCloseEvent
             クローズイベント
         """
-        # リソースのクリーンアップ
+        # 現在の状態を保存
+        self.save_window_state()
+
+        # 既存のクリーンアップ処理
         self.reader_view.close_current_book()
         self.db_manager.close()
         event.accept()
@@ -2045,3 +2069,176 @@ class MainWindow(QMainWindow):
         current_view = self.library_tabs.currentWidget()
         if current_view == self.grid_view:
             self.grid_view.ensure_correct_layout()
+
+    def filter_by_status(self, index):
+        """
+        読書状態でフィルタリングする。
+
+        Parameters
+        ----------
+        index : int
+            コンボボックスのインデックス
+        """
+        status = self.status_combo.itemData(index)
+
+        self.grid_view.set_status_filter(status)
+        self.list_view.set_status_filter(status)
+
+        # ステータスバーにメッセージを表示
+        self.update_filter_status()
+
+    def clear_status_filter(self):
+        """読書状態フィルタをクリアする。"""
+        self.status_combo.setCurrentIndex(0)  # 「All Statuses」を選択
+
+    def update_filter_status(self):
+        """フィルタの状態をステータスバーに表示する。"""
+        category_id = self.category_combo.currentData()
+        category_name = self.category_combo.currentText()
+
+        status_id = self.status_combo.currentData()
+        status_name = self.status_combo.currentText()
+
+        filter_msg = []
+
+        if category_id is not None:
+            filter_msg.append(f"Category: {category_name}")
+
+        if status_id is not None:
+            filter_msg.append(f"Status: {status_name}")
+
+        if filter_msg:
+            self.statusBar.showMessage(f"Filtered by {' and '.join(filter_msg)}")
+        else:
+            self.statusBar.showMessage("Showing all books")
+
+    def save_window_state(self):
+        """現在のアプリケーション状態を保存する。"""
+        settings = QSettings("YourOrg", "PDFLibraryManager")
+
+        # ウィンドウのジオメトリとステートを保存
+        settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/state", self.saveState())
+
+        # スプリッター位置
+        settings.setValue("splitter/sizes", self.main_splitter.sizes())
+
+        # 現在のタブとビュー状態
+        settings.setValue("ui/main_tab_index", self.main_tabs.currentIndex())
+        settings.setValue("ui/library_tab_index", self.library_tabs.currentIndex())
+        settings.setValue("ui/series_tab_index", self.series_tabs.currentIndex())
+
+        # フィルター状態
+        settings.setValue("filters/category_index", self.category_combo.currentIndex())
+        settings.setValue("filters/status_index", self.status_combo.currentIndex())
+        settings.setValue("filters/search_text", self.search_box.text())
+
+        # 選択状態
+        if self.current_series_id:
+            settings.setValue("state/current_series_id", self.current_series_id)
+
+        current_book_id = self.reader_view.current_book_id
+        if current_book_id:
+            settings.setValue("state/current_book_id", current_book_id)
+
+    def restore_window_state(self):
+        """保存されたアプリケーション状態を復元する。"""
+        settings = QSettings("YourOrg", "PDFLibraryManager")
+
+        # ウィンドウのジオメトリとステートを復元
+        geometry = settings.value("window/geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        state = settings.value("window/state")
+        if state:
+            self.restoreState(state)
+
+        # スプリッター位置
+        splitter_sizes = settings.value("splitter/sizes")
+        if splitter_sizes:
+            self.main_splitter.setSizes(splitter_sizes)
+
+        # タブとビュー状態（非同期にしてデータロード後に適用）
+        self.pending_ui_restore = {
+            "main_tab_index": settings.value("ui/main_tab_index", 0, int),
+            "library_tab_index": settings.value("ui/library_tab_index", 0, int),
+            "series_tab_index": settings.value("ui/series_tab_index", 0, int),
+            "category_index": settings.value("filters/category_index", 0, int),
+            "status_index": settings.value("filters/status_index", 0, int),
+            "search_text": settings.value("filters/search_text", ""),
+            "current_series_id": settings.value("state/current_series_id"),
+            "current_book_id": settings.value("state/current_book_id"),
+        }
+
+        # データロード完了後に状態復元を完了するためのタイマーを設定
+        QTimer.singleShot(500, self.complete_state_restoration)
+
+    def complete_state_restoration(self):
+        """データロード完了後に状態復元を完了する。"""
+        if not hasattr(self, "pending_ui_restore") or self.loading:
+            # まだロード中であれば、もう少し待つ
+            QTimer.singleShot(500, self.complete_state_restoration)
+            return
+
+        # タブインデックスを復元
+        self.main_tabs.setCurrentIndex(self.pending_ui_restore["main_tab_index"])
+        self.library_tabs.setCurrentIndex(self.pending_ui_restore["library_tab_index"])
+        self.series_tabs.setCurrentIndex(self.pending_ui_restore["series_tab_index"])
+
+        # フィルター状態を復元
+        self.category_combo.setCurrentIndex(self.pending_ui_restore["category_index"])
+        self.status_combo.setCurrentIndex(self.pending_ui_restore["status_index"])
+
+        # 検索テキストを復元（必要に応じて検索を実行）
+        search_text = self.pending_ui_restore["search_text"]
+        if search_text:
+            self.search_box.setText(search_text)
+            self.search_books()
+
+        # シリーズと書籍の選択状態を復元
+        current_series_id = self.pending_ui_restore.get("current_series_id")
+        if current_series_id:
+            self.restore_series_selection(current_series_id)
+
+        current_book_id = self.pending_ui_restore.get("current_book_id")
+        if current_book_id:
+            self.restore_book_selection(current_book_id)
+
+        # 復元完了
+        del self.pending_ui_restore
+
+    def restore_series_selection(self, series_id):
+        """
+        シリーズの選択状態を復元する。
+
+        Parameters
+        ----------
+        series_id : int
+            選択するシリーズID
+        """
+        # シリーズグリッドビューとリストビューの選択を復元
+        if self.main_tabs.currentIndex() == 1:  # Seriesタブが表示中
+            if self.series_tabs.currentIndex() == 0:  # グリッドビュー
+                self.series_grid_view.select_series(series_id, emit_signal=False)
+            else:  # リストビュー
+                self.series_list_view.select_series(series_id, emit_signal=False)
+
+    def restore_book_selection(self, book_id):
+        """
+        書籍の選択状態を復元する。
+
+        Parameters
+        ----------
+        book_id : int
+            選択する書籍ID
+        """
+        # 書籍グリッドビューとリストビューの選択を復元
+        if self.main_tabs.currentIndex() == 0:  # Booksタブが表示中
+            if self.library_tabs.currentIndex() == 0:  # グリッドビュー
+                self.grid_view.select_book(book_id, emit_signal=False)
+            else:  # リストビュー
+                self.list_view.select_book(book_id, emit_signal=False)
+
+            # 必要であれば書籍を開く
+            QTimer.singleShot(100, lambda: self.reader_view.load_book(book_id))

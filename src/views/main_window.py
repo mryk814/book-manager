@@ -1,7 +1,16 @@
 import os
 import sys
 
-from PyQt6.QtCore import QByteArray, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QByteArray,
+    QEvent,
+    QPoint,
+    QSettings,
+    QSize,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QKeySequence, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -88,6 +97,9 @@ class MainWindow(QMainWindow):
         # ウィンドウの基本設定
         self.setWindowTitle("PDF Library Manager")
         self.setMinimumSize(1280, 720)
+        self.resize(
+            1600, 900
+        )  # フルHDの80%程度の初期サイズ（一般的に使いやすいサイズ）
 
         # メインウィジェットとレイアウトの設定
         self.central_widget = QWidget()
@@ -118,8 +130,10 @@ class MainWindow(QMainWindow):
         self.setup_reader_panel()
         self.main_splitter.addWidget(self.reader_panel)
 
-        # スプリッターの初期サイズを設定
-        self.main_splitter.setSizes([550, 700])
+        # __init__内の呼び出し
+        self.main_splitter.setSizes([550, 700])  # 初期値（ウィンドウリサイズ前）
+        # ウィンドウが表示された後に調整
+        QTimer.singleShot(100, self.set_optimal_splitter_sizes)
 
         # スプリッターハンドルのストレッチファクタを設定
         # 0: 左側のウィジェットは固定サイズ、1: 右側のウィジェットが伸縮
@@ -174,6 +188,53 @@ class MainWindow(QMainWindow):
         # 非同期でデータをロード
         QTimer.singleShot(50, self.async_initialize_data)
 
+        # ウィンドウサイズを調整するメソッドを追加
+        self.configure_window_for_display()
+
+        # 設定からグリッドビューの列数などを読み込み
+        self.load_grid_view_settings()
+
+    def configure_window_for_display(self):
+        """ディスプレイサイズに合わせてウィンドウサイズを設定"""
+        screen = QApplication.primaryScreen().availableGeometry()
+
+        # フルHDかそれ以上の解像度の場合
+        if screen.width() >= 1920:
+            # 画面の80%を占める大きさに設定
+            width = int(screen.width() * 0.8)
+            height = int(screen.height() * 0.8)
+            self.resize(width, height)
+        else:
+            # 小さい画面では比率を調整
+            width = min(1280, int(screen.width() * 0.9))
+            height = min(720, int(screen.height() * 0.9))
+            self.resize(width, height)
+
+    def load_grid_view_settings(self):
+        """設定から読み込み、グリッドビューに適用"""
+        # 設定から理想的な列数などを読み込む例
+        settings = QSettings("YourOrg", "PDFLibraryManager")
+
+        # GridViewの設定を適用
+        preferred_columns = settings.value("grid_view/preferred_columns", 5, int)
+        self.grid_view.ideal_columns = preferred_columns
+
+        # ウィンドウの表示後にレイアウトを調整
+        QTimer.singleShot(200, self.adjust_layouts_after_show)
+
+    def adjust_layouts_after_show(self):
+        """ウィンドウ表示後にレイアウトを調整"""
+        # スプリッターサイズを設定
+        self.set_optimal_splitter_sizes()
+
+        # グリッドビューのレイアウトを調整
+        self.grid_view.calculate_grid_columns()
+        self.grid_view.relayout_grid()
+
+        # シリーズビューも同様に
+        self.series_grid_view.calculate_grid_columns()
+        self.series_grid_view.relayout_grid()
+
     def _update_splash(self, message):
         """スプラッシュスクリーンのメッセージを更新する"""
         if self.splash:
@@ -181,6 +242,13 @@ class MainWindow(QMainWindow):
                 message, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter
             )
             QApplication.processEvents()
+
+    def set_optimal_splitter_sizes(self):
+        total_width = self.width()
+        left_panel_width = int(total_width * 0.35)  # 全体の35%を左パネルに
+        right_panel_width = total_width - left_panel_width
+        self.main_splitter.setSizes([left_panel_width, right_panel_width])
+        self.left_panel_width = left_panel_width  # 記憶用
 
     def async_initialize_data(self):
         """非同期でアプリケーションデータを初期化する"""
@@ -693,6 +761,10 @@ class MainWindow(QMainWindow):
             # グリッドビューに切り替えた場合、レイアウトを更新
             if index == 0:
                 QTimer.singleShot(100, self.series_grid_view.ensure_correct_layout)
+
+        # ビュータイプ変更後にレイアウトを調整
+        if index == 0:  # Grid View
+            QTimer.singleShot(50, lambda: self.grid_view.ensure_correct_layout())
 
     def filter_by_category(self, index):
         """
@@ -1839,6 +1911,14 @@ class MainWindow(QMainWindow):
         if self.in_series_filtered_mode and self.current_series_id:
             self.apply_series_filter(self.current_series_id)
 
+        # ビュー切り替え時にレイアウトを調整
+        current_view = self.library_tabs.currentWidget()
+        if current_view == self.grid_view:
+            QTimer.singleShot(50, self.grid_view.ensure_correct_layout)
+        elif current_view == self.list_view:
+            # リストビューの調整があれば
+            pass
+
     def load_all_series(self):
         """すべてのシリーズをロードする"""
         # シリーズを取得してキャッシュ
@@ -1944,23 +2024,21 @@ class MainWindow(QMainWindow):
             )
 
     def on_splitter_moved(self, pos, index):
-        """スプリッターハンドルが動いた時に左側のサイズを記憶する"""
-        if index == 1:  # 最初のスプリッターハンドル
-            self.left_panel_width = pos
+        """スプリッターが移動したときにユーザーの調整を記録"""
+        self.left_panel_width = pos
+        self.user_adjusted_splitter = True
 
     def resizeEvent(self, event):
-        """ウィンドウサイズ変更時のイベント"""
-        # スーパークラスの処理を呼び出し
+        """ウィンドウサイズ変更時に呼ばれる"""
         super().resizeEvent(event)
 
-        # メインスプリッターの幅を取得
-        splitter_width = self.main_splitter.width()
-
-        if splitter_width > self.left_panel_width + 100:
-            # サイズの再設定（左側は記憶されたサイズ、右側は残り全部）
-            self.main_splitter.setSizes(
-                [self.left_panel_width, splitter_width - self.left_panel_width]
-            )
+        # スプリッターのバランスを最適化
+        # ただし、ユーザーが手動で調整した場合は優先
+        if (
+            not hasattr(self, "user_adjusted_splitter")
+            or not self.user_adjusted_splitter
+        ):
+            QTimer.singleShot(100, self.set_optimal_splitter_sizes)
 
     def ensure_grid_layout(self):
         """グリッドレイアウトが適切に更新されるようにする"""

@@ -1,4 +1,13 @@
-from PyQt6.QtCore import QByteArray, QEvent, QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QByteArray,
+    QEvent,
+    QPoint,
+    QSettings,
+    QSize,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import QAction, QColor, QIcon, QImage, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -228,13 +237,19 @@ class BookGridItemWidget(QWidget):
         self.book = book
         self.cover_loaded = False
 
-        # レイアウトの設定
+        # レイアウト設定
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(8, 8, 8, 8)  # 内部マージンを少し広げる
+
+        # 表紙画像サイズを親ウィジェットから自動取得
+        cover_width = (
+            parent.item_width - 36 if parent and hasattr(parent, "item_width") else 180
+        )
+        cover_height = int(cover_width * 4 / 3)  # 4:3アスペクト比
 
         # 表紙画像
         self.cover_label = QLabel()
-        self.cover_label.setFixedSize(150, 200)
+        self.cover_label.setFixedSize(cover_width, cover_height)
         self.cover_label.setScaledContents(True)
         self.cover_label.setFrameShape(QFrame.Shape.Box)
 
@@ -455,7 +470,20 @@ class LibraryGridView(QScrollArea):
 
         # グリッドレイアウト
         self.grid_layout = QGridLayout(self.content_widget)
-        self.grid_layout.setSpacing(10)
+        self.grid_layout.setSpacing(12)  # スペーシングを少し広げる
+        self.grid_layout.setContentsMargins(15, 15, 15, 15)  # 余白を追加
+
+        # 表示パラメータ - フルHD環境向けに最適化
+        self.min_columns = 2
+        self.max_columns = 8
+        self.ideal_columns = 5  # フルHD環境での理想的な列数
+        self.min_item_width = 160
+        self.preferred_item_width = 200  # 理想的なアイテム幅
+        self.max_item_width = 260
+
+        # 初期値設定
+        self.grid_columns = self.ideal_columns
+        self.item_width = self.preferred_item_width
 
         # 選択中の書籍ID（単一選択時）
         self.selected_book_id = None
@@ -526,21 +554,66 @@ class LibraryGridView(QScrollArea):
         return super().eventFilter(obj, event)
 
     def calculate_grid_columns(self):
-        """ビューポートの幅に基づいて列数を計算"""
+        """ビューポートの幅に基づいて列数と適切なアイテム幅を計算"""
         viewport_width = self.viewport().width()
 
-        # 利用可能な幅に基づいて列数を計算
-        # 20pxはスクロールバーやマージン用の余白
-        available_width = max(1, viewport_width - 20)
+        # 利用可能な幅を計算（マージンとスクロールバー考慮）
+        margins = self.grid_layout.contentsMargins()
+        available_width = (
+            viewport_width - margins.left() - margins.right() - 20
+        )  # スクロールバー
 
-        # 列数を計算（少なくとも1列）
-        new_columns = max(1, available_width // self.item_width)
+        # スペーシング取得
+        spacing = self.grid_layout.spacing()
 
-        # 列数が変わった場合に更新
-        if new_columns != self.grid_columns:
-            self.grid_columns = new_columns
-            return True
-        return False
+        # 1. 希望する幅で何列表示できるか計算
+        columns = max(
+            self.min_columns,
+            min(
+                self.max_columns,
+                (available_width + spacing) // (self.preferred_item_width + spacing),
+            ),
+        )
+
+        # 2. その列数で最適なアイテム幅を計算
+        item_width = max(
+            self.min_item_width,
+            min(
+                self.max_item_width,
+                (available_width - (columns - 1) * spacing) // columns,
+            ),
+        )
+
+        # 値が変わった場合のみ更新
+        layout_changed = False
+        if columns != self.grid_columns:
+            self.grid_columns = columns
+            layout_changed = True
+
+        if abs(item_width - self.item_width) > 5:  # 5px以上の差があれば更新
+            self.item_width = item_width
+            layout_changed = True
+
+        return layout_changed
+
+    def calculate_ideal_item_width(self):
+        """ビューポートの幅に基づいて理想的なアイテム幅を計算"""
+        viewport_width = self.viewport().width()
+        spacing = 10
+
+        # 目標列数 (例: 4または5列が見栄えが良い)
+        target_columns = 4
+
+        # 理想的なアイテム幅を計算
+        # (ビューポート幅 - 両端マージン - (列数-1)*スペーシング) ÷ 列数
+        ideal_width = (
+            viewport_width - 20 - (target_columns - 1) * spacing
+        ) // target_columns
+
+        # 最小サイズと最大サイズの制約を適用
+        min_width = 150
+        max_width = 250
+        return max(min_width, min(max_width, ideal_width))
 
     def relayout_grid(self):
         """グリッドレイアウトを現在の列数で再レイアウト"""
@@ -615,8 +688,8 @@ class LibraryGridView(QScrollArea):
             col = i % self.grid_columns
 
             # 書籍ウィジェットを作成
-            book_widget = BookGridItemWidget(book)
-            book_widget.setFixedSize(190, 280)
+            book_widget = BookGridItemWidget(book, self)  # selfを親として渡す
+            book_widget.setFixedWidth(self.item_width)  # 幅だけ設定
             book_widget.setCursor(Qt.CursorShape.PointingHandCursor)
             book_widget.mousePressEvent = (
                 lambda event, b=book.id: self._on_book_clicked(event, b)
@@ -951,6 +1024,25 @@ class LibraryGridView(QScrollArea):
         # メニューを表示
         menu.exec(position)
 
+    def _populate_grid(self, books):
+        """
+        書籍をグリッドに配置する。（遅延ロード対応版）
+
+        Parameters
+        ----------
+        books : list
+            Book オブジェクトのリスト
+        """
+        # 書籍データを保存
+        self.all_books = books
+
+        # 列数を更新
+        self.update_grid_columns()
+
+        # 最初のバッチだけ即時表示
+        self.loaded_count = 0
+        self.load_more_books()
+
     def _select_book(self, book_id, add_to_selection=False):
         """
         書籍を選択状態にする。
@@ -1270,8 +1362,25 @@ class LibraryGridView(QScrollArea):
 
     def ensure_correct_layout(self):
         """現在のビューポートサイズに基づいて正しいレイアウトを確保する"""
-        if self.calculate_grid_columns() and self.book_widgets:
+        # ビューポートサイズに基づいて計算
+        layout_changed = self.calculate_grid_columns()
+
+        # アイテムサイズと列数の更新が必要な場合
+        if layout_changed and self.book_widgets:
+            # 現在のサイズを保存
+            settings = QSettings("YourOrg", "PDFLibraryManager")
+            settings.setValue("grid_view/preferred_columns", self.grid_columns)
+
+            # アイテムサイズを更新
+            for book_id, widget in self.book_widgets.items():
+                if hasattr(widget, "update_size"):
+                    widget.update_size(self.item_width)
+
+            # グリッドレイアウトを再構成
             self.relayout_grid()
+
+            # 表示範囲内のアイテムを優先的に読み込む
+            QTimer.singleShot(10, self.update_visible_widgets)
 
 
 class LibraryListView(QWidget):

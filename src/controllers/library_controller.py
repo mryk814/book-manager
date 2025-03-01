@@ -30,7 +30,14 @@ class LibraryController:
         self.db_manager = db_manager
         self._current_book = None
 
-    def get_all_books(self, category_id=None, series_id=None, status=None):
+    def get_all_books(
+        self,
+        category_id=None,
+        series_id=None,
+        status=None,
+        sort_by=None,
+        sort_order="asc",
+    ):
         """
         条件に合う書籍のリストを取得する。
 
@@ -42,6 +49,10 @@ class LibraryController:
             特定のシリーズに属する書籍のみを取得
         status : str, optional
             特定の読書状態の書籍のみを取得
+        sort_by : str, optional
+            ソート基準 ('title', 'author', 'publisher', 'added_date', 'status', 'last_read', 'series_order')
+        sort_order : str, optional
+            ソート順序 ('asc' または 'desc')
 
         Returns
         -------
@@ -54,7 +65,9 @@ class LibraryController:
 
         if series_id:
             # シリーズIDが指定されている場合は、そのシリーズの書籍のみを取得
-            book_data_list = self.db_manager.get_books_in_series(series_id)
+            book_data_list = self.db_manager.get_books_in_series(
+                series_id, sort_by=sort_by, sort_order=sort_order
+            )
 
             # ステータスフィルタが指定されている場合はさらにフィルタリング
             if status:
@@ -64,15 +77,17 @@ class LibraryController:
         elif category_id:
             # カテゴリIDが指定されている場合
             book_data_list = self.db_manager.get_books_by_category(
-                category_id, **query_params
+                category_id, sort_by=sort_by, sort_order=sort_order, **query_params
             )
         else:
             # それ以外は検索条件に基づいて取得
-            book_data_list = self.db_manager.search_books(**query_params)
+            book_data_list = self.db_manager.search_books(
+                sort_by=sort_by, sort_order=sort_order, **query_params
+            )
 
         return [Book(book_data, self.db_manager) for book_data in book_data_list]
 
-    def search_books(self, query):
+    def search_books(self, query, sort_by=None, sort_order="asc"):
         """
         書籍を検索する。
 
@@ -80,13 +95,19 @@ class LibraryController:
         ----------
         query : str
             検索クエリ
+        sort_by : str, optional
+            ソート基準 ('title', 'author', 'publisher', 'added_date', 'status', 'last_read')
+        sort_order : str, optional
+            ソート順序 ('asc' または 'desc')
 
         Returns
         -------
         list
             Book オブジェクトのリスト
         """
-        book_data_list = self.db_manager.search_books(query=query)
+        book_data_list = self.db_manager.search_books(
+            query=query, sort_by=sort_by, sort_order=sort_order
+        )
         return [Book(book_data, self.db_manager) for book_data in book_data_list]
 
     def get_book(self, book_id):

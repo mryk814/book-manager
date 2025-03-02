@@ -532,10 +532,6 @@ class LibraryGridView(QScrollArea):
         self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
         self.grid_layout.addWidget(self.placeholder, 0, 0)
 
-        # ソートパラメータを追加
-        self.sort_by = None
-        self.sort_order = "asc"
-
     def resizeEvent(self, event):
         """ウィジェットのサイズが変わったときに呼ばれる"""
         super().resizeEvent(event)
@@ -808,16 +804,11 @@ class LibraryGridView(QScrollArea):
         """
         if self.search_query:
             # 検索クエリがある場合は検索結果を返す
-            base_books = self.library_controller.search_books(
-                self.search_query, sort_by=self.sort_by, sort_order=self.sort_order
-            )
+            base_books = self.library_controller.search_books(self.search_query)
         else:
             # カテゴリフィルタとステータスフィルタを適用
             base_books = self.library_controller.get_all_books(
-                category_id=self.category_filter,
-                status=self.status_filter,
-                sort_by=self.sort_by,
-                sort_order=self.sort_order,
+                category_id=self.category_filter, status=self.status_filter
             )
 
         return base_books
@@ -1412,21 +1403,6 @@ class LibraryGridView(QScrollArea):
             # 表示範囲内のアイテムを優先的に読み込む
             QTimer.singleShot(10, self.update_visible_widgets)
 
-    def set_sort_params(self, sort_by, sort_order="asc"):
-        """
-        ソートパラメータを設定する。
-
-        Parameters
-        ----------
-        sort_by : str
-            ソート基準
-        sort_order : str, optional
-            ソート順序 ('asc' または 'desc')
-        """
-        self.sort_by = sort_by
-        self.sort_order = sort_order
-        self.refresh()  # ビューを更新
-
 
 class LibraryListView(QWidget):
     """
@@ -1489,27 +1465,8 @@ class LibraryListView(QWidget):
         self.loading_item = QListWidgetItem("Loading more books...")
         self.loading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # ソートパラメータを追加
-        self.sort_by = None
-        self.sort_order = "asc"
-
         # ライブラリを読み込む
         self.refresh()
-
-    def set_sort_params(self, sort_by, sort_order="asc"):
-        """
-        ソートパラメータを設定する。
-
-        Parameters
-        ----------
-        sort_by : str
-            ソート基準
-        sort_order : str, optional
-            ソート順序 ('asc' または 'desc')
-        """
-        self.sort_by = sort_by
-        self.sort_order = sort_order
-        self.refresh()  # ビューを更新
 
     def refresh(self):
         """ライブラリを再読み込みして表示を更新する。（遅延ロード対応版）"""
@@ -1630,16 +1587,11 @@ class LibraryListView(QWidget):
         """
         if self.search_query:
             # 検索クエリがある場合は検索結果を返す
-            return self.library_controller.search_books(
-                self.search_query, sort_by=self.sort_by, sort_order=self.sort_order
-            )
+            return self.library_controller.search_books(self.search_query)
         else:
             # カテゴリフィルタがある場合はそれを適用
             return self.library_controller.get_all_books(
-                category_id=self.category_filter,
-                status=self.status_filter,
-                sort_by=self.sort_by,
-                sort_order=self.sort_order,
+                category_id=self.category_filter
             )
 
     def _populate_list(self, books):

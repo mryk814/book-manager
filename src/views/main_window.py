@@ -201,18 +201,6 @@ class MainWindow(QMainWindow):
         self.default_sort_by = "title"
         self.default_sort_order = "asc"
 
-        # スタイルシートのインポート
-        from utils.styles import StyleSheets
-
-        # メインウィンドウにスタイルを適用
-        self.setStyleSheet(StyleSheets.MAIN_WINDOW)
-
-        # ツールバーにスタイルを適用
-        self.toolbar.setStyleSheet(StyleSheets.TOOLBAR)
-
-        # ステータスバーにスタイルを適用
-        self.statusBar.setStyleSheet(StyleSheets.STATUSBAR)
-
         # ウィンドウ表示後に少し遅らせて設定を再適用
         QTimer.singleShot(100, self.apply_window_settings)
 
@@ -479,29 +467,6 @@ class MainWindow(QMainWindow):
         self.clear_search_button = QPushButton("Clear")
         self.clear_search_button.clicked.connect(self.clear_search)
         self.toolbar.addWidget(self.clear_search_button)
-
-        # ソート設定を追加
-        self.toolbar.addSeparator()
-
-        self.sort_label = QLabel("Sort by:")
-        self.toolbar.addWidget(self.sort_label)
-
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItem("Title", "title")
-        self.sort_combo.addItem("Author", "author")
-        self.sort_combo.addItem("Publisher", "publisher")
-        self.sort_combo.addItem("Added Date", "added_date")
-        self.sort_combo.addItem("Reading Status", "status")
-        self.sort_combo.addItem("Last Read", "last_read")
-        self.sort_combo.currentIndexChanged.connect(self.change_sort_by)
-        self.toolbar.addWidget(self.sort_combo)
-
-        # ソート順序
-        self.sort_order_combo = QComboBox()
-        self.sort_order_combo.addItem("Ascending", "asc")
-        self.sort_order_combo.addItem("Descending", "desc")
-        self.sort_order_combo.currentIndexChanged.connect(self.change_sort_order)
-        self.toolbar.addWidget(self.sort_order_combo)
 
     def setup_menubar(self):
         """メニューバーを設定する。"""
@@ -1154,32 +1119,12 @@ class MainWindow(QMainWindow):
         self.series_books_cache = {}
         self.all_series = []
 
-        # 現在のソート設定を取得
-        sort_by = (
-            self.sort_combo.currentData()
-            if hasattr(self, "sort_combo")
-            else self.default_sort_by
-        )
-        sort_order = (
-            self.sort_order_combo.currentData()
-            if hasattr(self, "sort_order_combo")
-            else self.default_sort_order
-        )
-
         # 現在の状態に応じてビューを更新
         current_main_tab = self.main_tabs.currentWidget()
 
         if current_main_tab == self.books_tab:
             # 書籍タブがアクティブな場合
-            if self.in_series_filtered_mode and self.current_series_id:
-                # シリーズフィルタモードの場合
-                self.filter_by_series(self.current_series_id, sort_by, sort_order)
-            else:
-                # 通常モードの場合
-                self.grid_view.set_sort_params(sort_by, sort_order)
-                self.list_view.set_sort_params(sort_by, sort_order)
-                self.grid_view.refresh()
-                self.list_view.refresh()
+            self.refresh_books_view()
         else:
             # シリーズタブがアクティブな場合
             self.load_all_series()
@@ -1806,7 +1751,7 @@ class MainWindow(QMainWindow):
         # シリーズタブに切り替え
         self.main_tabs.setCurrentWidget(self.series_tab)
 
-    def filter_by_series(self, series_id, sort_by=None, sort_order="asc"):
+    def filter_by_series(self, series_id):
         """
         シリーズでフィルタリングする。
 
@@ -1814,29 +1759,14 @@ class MainWindow(QMainWindow):
         ----------
         series_id : int
             フィルタリングするシリーズID
-        sort_by : str, optional
-            ソート基準
-        sort_order : str, optional
-            ソート順序 ('asc' または 'desc')
         """
-        # ソートパラメータが指定されていない場合は現在の設定を使用
-        if sort_by is None:
-            sort_by = self.sort_combo.currentData()
-        if sort_order is None:
-            sort_order = self.sort_order_combo.currentData()
-
-        # キャッシュキーにソート情報を含める
-        cache_key = f"{series_id}_{sort_by}_{sort_order}"
-
         # キャッシュから書籍リストを取得（パフォーマンス改善）
-        if cache_key in self.series_books_cache:
-            books = self.series_books_cache[cache_key]
+        if series_id in self.series_books_cache:
+            books = self.series_books_cache[series_id]
         else:
             # キャッシュにない場合は取得してキャッシュに保存
-            books = self.library_controller.get_all_books(
-                series_id=series_id, sort_by=sort_by, sort_order=sort_order
-            )
-            self.series_books_cache[cache_key] = books
+            books = self.library_controller.get_all_books(series_id=series_id)
+            self.series_books_cache[series_id] = books
 
         # 現在のビューに応じてリストを更新
         current_view = self.library_tabs.currentWidget()
@@ -2055,12 +1985,27 @@ class MainWindow(QMainWindow):
         series_id : int
             フィルタリングするシリーズID
         """
-        # 現在選択されているソート基準とソート順序を取得
-        sort_by = self.sort_combo.currentData()
-        sort_order = self.sort_order_combo.currentData()
+        # キャッシュから書籍を取得（なければロード）
+        if series_id not in self.series_books_cache:
+            books = self.library_controller.get_all_books(series_id=series_id)
+            self.series_books_cache[series_id] = books
+        else:
+            books = self.series_books_cache[series_id]
 
-        # フィルタを適用
-        self.filter_by_series(series_id, sort_by, sort_order)
+        # 現在のビューを取得
+        current_view = self.library_tabs.currentWidget()
+
+        # ビュータイプに基づいて表示を更新
+        if current_view == self.grid_view:
+            # グリッドビューの表示をクリア
+            self.grid_view._clear_grid()
+            # シリーズに属する書籍だけを表示
+            self.grid_view._populate_grid(books)
+        elif current_view == self.list_view:
+            # リストビューの表示をクリア
+            self.list_view.list_widget.clear()
+            # シリーズに属する書籍だけを表示
+            self.list_view._populate_list(books)
 
     def refresh_books_view(self):
         """書籍ビューを現在の状態に応じてリフレッシュする"""
@@ -2352,51 +2297,3 @@ class MainWindow(QMainWindow):
 
             # 必要であれば書籍を開く
             QTimer.singleShot(100, lambda: self.reader_view.load_book(book_id))
-
-    def change_sort_by(self, index):
-        """
-        ソート基準を変更する。
-
-        Parameters
-        ----------
-        index : int
-            選択されたインデックス
-        """
-        # 現在選択されているソート基準とソート順序を取得
-        sort_by = self.sort_combo.currentData()
-        sort_order = self.sort_order_combo.currentData()
-
-        # 現在のタブに応じてビューを更新
-        current_main_tab = self.main_tabs.currentWidget()
-
-        if current_main_tab == self.books_tab:
-            # 書籍タブがアクティブな場合
-            if self.in_series_filtered_mode and self.current_series_id:
-                # シリーズフィルタ時
-                self.filter_by_series(self.current_series_id, sort_by, sort_order)
-            else:
-                # 通常時
-                self.grid_view.set_sort_params(sort_by, sort_order)
-                self.list_view.set_sort_params(sort_by, sort_order)
-                self.refresh_books_view()
-
-        # ステータスバーに表示
-        self.update_sort_status()
-
-    def change_sort_order(self, index):
-        """
-        ソート順序を変更する。
-
-        Parameters
-        ----------
-        index : int
-            選択されたインデックス
-        """
-        # ソート基準変更と同じ処理を行う
-        self.change_sort_by(self.sort_combo.currentIndex())
-
-    def update_sort_status(self):
-        """ソート状態をステータスバーに表示する。"""
-        sort_by_text = self.sort_combo.currentText()
-        sort_order_text = self.sort_order_combo.currentText()
-        self.statusBar.showMessage(f"Sorted by {sort_by_text}, {sort_order_text}")

@@ -85,7 +85,7 @@ class DatabaseManager:
             cover_image BLOB,
             added_date TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (series_id) REFERENCES series (id),
-            FOREIGN KEY (category_id) REFERENCES categories (id)  -- 追加: 外部キー
+            FOREIGN KEY (category_id) REFERENCES categories (id)
         )
         """)
 
@@ -399,7 +399,7 @@ class DatabaseManager:
             return dict(row)
         return None
 
-    def get_books_in_series(self, series_id, sort_by=None, sort_order="asc"):
+    def get_books_in_series(self, series_id):
         """
         指定したシリーズに属する書籍のリストを取得する。
 
@@ -407,10 +407,6 @@ class DatabaseManager:
         ----------
         series_id : int
             シリーズのID
-        sort_by : str, optional
-            ソート基準 ('title', 'author', 'publisher', 'added_date', 'status', 'last_read', 'series_order')
-        sort_order : str, optional
-            ソート順序 ('asc' または 'desc')
 
         Returns
         -------
@@ -420,49 +416,43 @@ class DatabaseManager:
         conn = self.connect()
         cursor = conn.cursor()
 
-        sql = """
-        SELECT b.*, rp.status, rp.current_page, rp.total_pages, rp.last_read_date
-        FROM books b
-        LEFT JOIN reading_progress rp ON b.id = rp.book_id
-        WHERE b.series_id = ?
-        """
+        cursor.execute(
+            """
+            SELECT b.*, rp.status, rp.current_page, rp.total_pages
+            FROM books b
+            LEFT JOIN reading_progress rp ON b.id = rp.book_id
+            WHERE b.series_id = ?
+            ORDER BY b.series_order, b.title COLLATE NOCASE
+            """,
+            (series_id,),
+        )
 
-        params = [series_id]
+        results = [dict(row) for row in cursor.fetchall()]
 
-        # ソート条件の設定
-        if sort_by:
-            sort_column = "b.title"
+        # 自然順ソートを実装（数値を考慮したソート）
+        import re
 
-            if sort_by == "author":
-                sort_column = "b.author"
-            elif sort_by == "publisher":
-                sort_column = "b.publisher"
-            elif sort_by == "added_date":
-                sort_column = "b.added_date"
-            elif sort_by == "status":
-                sort_column = "rp.status"
-            elif sort_by == "last_read":
-                sort_column = "rp.last_read_date"
-            elif sort_by == "series_order":
-                # series_orderが存在すればそれを、なければ最大値を使用
-                sort_column = "COALESCE(b.series_order, 999999)"
+        def natural_sort_key(item):
+            """
+            series_orderを最優先し、次にタイトルの自然順でソート
+            """
+            # series_orderがNoneの場合は最大値とする（最後に表示）
+            order = (
+                item["series_order"]
+                if item["series_order"] is not None
+                else float("inf")
+            )
+            title = item["title"] if item["title"] else ""
+            # 数値部分を抽出して数値として扱う
+            title_key = [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
+            ]
+            return (order, title_key)
 
-            # NULLは最後に来るようにCASE文を使用
-            sql += f" ORDER BY CASE WHEN {sort_column} IS NULL THEN 1 ELSE 0 END, {sort_column} COLLATE NOCASE"
+        # 結果を自然順でソート
+        return sorted(results, key=natural_sort_key)
 
-            # ソート順の指定
-            if sort_order.lower() == "desc":
-                sql += " DESC"
-        else:
-            # デフォルトはシリーズ順、次にタイトルでソート
-            sql += " ORDER BY COALESCE(b.series_order, 999999), b.title COLLATE NOCASE"
-
-        cursor.execute(sql, params)
-        return [dict(row) for row in cursor.fetchall()]
-
-    def search_books(
-        self, query=None, category_id=None, status=None, sort_by=None, sort_order="asc"
-    ):
+    def search_books(self, query=None, category_id=None, status=None):
         """
         条件に一致する書籍を検索する。
 
@@ -474,10 +464,6 @@ class DatabaseManager:
             カテゴリでフィルタリング
         status : str, optional
             読書状態でフィルタリング ('unread', 'reading', 'completed')
-        sort_by : str, optional
-            ソート基準 ('title', 'author', 'publisher', 'added_date', 'status', 'last_read')
-        sort_order : str, optional
-            ソート順序 ('asc' または 'desc')
 
         Returns
         -------
@@ -488,7 +474,7 @@ class DatabaseManager:
         cursor = conn.cursor()
 
         sql = """
-        SELECT b.*, rp.status, rp.current_page, rp.last_read_date, s.name as series_name
+        SELECT b.*, rp.status, rp.current_page, s.name as series_name
         FROM books b
         LEFT JOIN reading_progress rp ON b.id = rp.book_id
         LEFT JOIN series s ON b.series_id = s.id
@@ -506,42 +492,35 @@ class DatabaseManager:
             params.extend([query_param, query_param, query_param])
 
         if category_id:
-            sql += " AND (b.category_id = ? OR s.category_id = ?)"
-            params.extend([category_id, category_id])
+            sql += " AND c.id = ?"
+            params.append(category_id)
 
         if status:
             sql += " AND rp.status = ?"
             params.append(status)
 
-        # ソート条件の設定
-        if sort_by:
-            # デフォルトのソート順はタイトル
-            sort_column = "b.title"
-
-            if sort_by == "author":
-                sort_column = "b.author"
-            elif sort_by == "publisher":
-                sort_column = "b.publisher"
-            elif sort_by == "added_date":
-                sort_column = "b.added_date"
-            elif sort_by == "status":
-                sort_column = "rp.status"
-            elif sort_by == "last_read":
-                sort_column = "rp.last_read_date"
-
-            # 数値の場合でもCOLLATE NOCASEを適用（テキスト部分のソート用）
-            # NULLは最後に来るようにCASE文を使用
-            sql += f" ORDER BY CASE WHEN {sort_column} IS NULL THEN 1 ELSE 0 END, {sort_column} COLLATE NOCASE"
-
-            # ソート順の指定
-            if sort_order.lower() == "desc":
-                sql += " DESC"
-        else:
-            # デフォルトはタイトルでソート
-            sql += " ORDER BY b.title COLLATE NOCASE"
+        # タイトルでソートするが、文字列のまま渡す
+        sql += " ORDER BY b.title COLLATE NOCASE"  # COLLATE NOCASEで大文字小文字を区別しない
 
         cursor.execute(sql, params)
-        return [dict(row) for row in cursor.fetchall()]
+        results = [dict(row) for row in cursor.fetchall()]
+
+        # 自然順ソートを実装（数値を考慮したソート）
+        import re
+
+        def natural_sort_key(item):
+            """
+            文字列内の数値を数値として扱うキー関数
+            '作品A（1）'と'作品A（10）'を正しく順序付ける
+            """
+            title = item["title"] if item["title"] else ""
+            # 数値部分を抽出して数値として扱う
+            return [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
+            ]
+
+        # 結果を自然順でソート
+        return sorted(results, key=natural_sort_key)
 
     def get_category(self, category_id):
         """
@@ -805,20 +784,17 @@ class DatabaseManager:
             else updated_count
         )
 
-    def get_books_by_category(
-        self, category_id, sort_by=None, sort_order="asc", **kwargs
-    ):
+    def get_books_by_category(self, category_id, **kwargs):
         """
         特定のカテゴリに関連する書籍を取得する。
+
+        (1) 直接そのカテゴリに属している書籍
+        (2) そのカテゴリに属するシリーズの書籍
 
         Parameters
         ----------
         category_id : int
             カテゴリID
-        sort_by : str, optional
-            ソート基準 ('title', 'author', 'publisher', 'added_date', 'status', 'last_read')
-        sort_order : str, optional
-            ソート順序 ('asc' または 'desc')
         **kwargs
             その他の検索条件
 
@@ -832,7 +808,7 @@ class DatabaseManager:
 
         # 基本クエリ
         sql = """
-        SELECT b.*, rp.status, rp.current_page, rp.last_read_date, s.name as series_name, c.name as category_name
+        SELECT b.*, rp.status, rp.current_page, s.name as series_name, c.name as category_name
         FROM books b
         LEFT JOIN reading_progress rp ON b.id = rp.book_id
         LEFT JOIN series s ON b.series_id = s.id
@@ -848,34 +824,27 @@ class DatabaseManager:
                 sql += " AND rp.status = ?"
                 params.append(value)
 
-        # ソート条件の設定
-        if sort_by:
-            # デフォルトのソート順はタイトル
-            sort_column = "b.title"
-
-            if sort_by == "author":
-                sort_column = "b.author"
-            elif sort_by == "publisher":
-                sort_column = "b.publisher"
-            elif sort_by == "added_date":
-                sort_column = "b.added_date"
-            elif sort_by == "status":
-                sort_column = "rp.status"
-            elif sort_by == "last_read":
-                sort_column = "rp.last_read_date"
-
-            # NULLは最後に来るようにCASE文を使用
-            sql += f" ORDER BY CASE WHEN {sort_column} IS NULL THEN 1 ELSE 0 END, {sort_column} COLLATE NOCASE"
-
-            # ソート順の指定
-            if sort_order.lower() == "desc":
-                sql += " DESC"
-        else:
-            # デフォルトはタイトルでソート
-            sql += " ORDER BY b.title COLLATE NOCASE"
+        # タイトルでソート
+        sql += " ORDER BY b.title COLLATE NOCASE"
 
         cursor.execute(sql, params)
-        return [dict(row) for row in cursor.fetchall()]
+        results = [dict(row) for row in cursor.fetchall()]
+
+        # 自然順ソートを実装
+        import re
+
+        def natural_sort_key(item):
+            """
+            文字列内の数値を数値として扱うキー関数
+            """
+            title = item["title"] if item["title"] else ""
+            # 数値部分を抽出して数値として扱う
+            return [
+                int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
+            ]
+
+        # 結果を自然順でソート
+        return sorted(results, key=natural_sort_key)
 
     def migrate_database(self):
         """

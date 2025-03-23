@@ -2,18 +2,12 @@ from utils.theme import AppTheme
 
 
 class StyleSheets:
-    """
-    アプリケーション全体で使用するスタイルシートを集中管理するクラス。
-    """
-
-    # メインウィンドウのスタイル
     MAIN_WINDOW = f"""
         QMainWindow {{
             background-color: {AppTheme.BACKGROUND_MAIN};
         }}
     """
 
-    # ツールバーのスタイル
     TOOLBAR = f"""
         QToolBar {{
             background-color: {AppTheme.BACKGROUND_ALT};
@@ -27,7 +21,6 @@ class StyleSheets:
         }}
     """
 
-    # ステータスバーのスタイル
     STATUSBAR = f"""
         QStatusBar {{
             background-color: {AppTheme.BACKGROUND_ALT};
@@ -35,7 +28,6 @@ class StyleSheets:
         }}
     """
 
-    # リストアイテムのスタイル
     LIST_ITEM = f"""
         QListWidget::item {{
             border-bottom: 1px solid {AppTheme.DIVIDER};
@@ -52,7 +44,6 @@ class StyleSheets:
         }}
     """
 
-    # グリッドアイテムのスタイル
     GRID_ITEM_BASE = f"""
         background-color: {AppTheme.SURFACE};
         border-radius: 4px;
@@ -64,7 +55,6 @@ class StyleSheets:
         border: 1px solid {AppTheme.SELECTION_BORDER};
     """
 
-    # プレースホルダーのスタイル
     PLACEHOLDER = f"""
         background-color: {AppTheme.PLACEHOLDER_BACKGROUND};
         border: 1px solid {AppTheme.DIVIDER};
@@ -73,13 +63,11 @@ class StyleSheets:
         font-style: italic;
     """
 
-    # 読書状態のスタイル
     @staticmethod
     def reading_status_style(status):
         color = AppTheme.get_reading_status_color(status)
         return f"color: {color}; font-weight: bold;"
 
-    # カテゴリバッジのスタイル
     CATEGORY_BADGE = f"""
         background-color: {AppTheme.SECONDARY_LIGHT};
         color: white;
@@ -88,7 +76,6 @@ class StyleSheets:
         font-size: 12px;
     """
 
-    # シリーズバッジのスタイル
     SERIES_BADGE = f"""
         background-color: {AppTheme.PRIMARY_LIGHT};
         color: white;
@@ -97,7 +84,6 @@ class StyleSheets:
         font-size: 12px;
     """
 
-    # プログレスバーのスタイル
     PROGRESS_BAR = f"""
         QProgressBar {{
             border: 1px solid {AppTheme.DIVIDER};
@@ -111,7 +97,6 @@ class StyleSheets:
         }}
     """
 
-    # ボタンのスタイル
     BUTTON = f"""
         QPushButton {{
             background-color: {AppTheme.PRIMARY};
@@ -135,7 +120,6 @@ class StyleSheets:
         }}
     """
 
-    # セカンダリボタンのスタイル
     SECONDARY_BUTTON = f"""
         QPushButton {{
             background-color: white;

@@ -4,50 +4,23 @@ from pathlib import Path
 
 
 class DatabaseManager:
-    """
-    SQLiteデータベースの管理クラス。
-
-    書籍、シリーズ、メタデータ、読書進捗などの情報を保存・管理する。
-
-    Parameters
-    ----------
-    db_path : str
-        データベースファイルのパス。
-    """
-
     def __init__(self, db_path="library.db"):
-        """
-        Parameters
-        ----------
-        db_path : str, optional
-            データベースファイルのパス。デフォルトは'library.db'。
-        """
         self.db_path = db_path
         self.conn = None
         self._create_tables_if_not_exist()
 
     def connect(self):
-        """
-        データベースに接続する。
-
-        Returns
-        -------
-        sqlite3.Connection
-            データベース接続オブジェクト。
-        """
         if self.conn is None:
             self.conn = sqlite3.connect(self.db_path)
             self.conn.row_factory = sqlite3.Row
         return self.conn
 
     def close(self):
-        """データベース接続を閉じる。"""
         if self.conn:
             self.conn.close()
             self.conn = None
 
     def _create_tables_if_not_exist(self):
-        """必要なテーブルが存在しない場合に作成する。"""
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -130,31 +103,6 @@ class DatabaseManager:
         publisher=None,
         cover_image=None,
     ):
-        """
-        新しい書籍をデータベースに追加する。
-
-        Parameters
-        ----------
-        title : str
-            書籍のタイトル
-        file_path : str
-            PDFファイルへのパス
-        series_id : int, optional
-            所属するシリーズのID
-        series_order : int, optional
-            シリーズ内の順番
-        author : str, optional
-            著者名
-        publisher : str, optional
-            出版社名
-        cover_image : bytes, optional
-            表紙画像のバイナリデータ
-
-        Returns
-        -------
-        int
-            追加された書籍のID
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -193,19 +141,6 @@ class DatabaseManager:
             raise
 
     def get_book(self, book_id):
-        """
-        指定したIDの書籍情報を取得する。
-
-        Parameters
-        ----------
-        book_id : int
-            取得する書籍のID
-
-        Returns
-        -------
-        dict
-            書籍情報の辞書
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -225,21 +160,6 @@ class DatabaseManager:
         return None
 
     def update_book(self, book_id, **kwargs):
-        """
-        書籍情報を更新する。
-
-        Parameters
-        ----------
-        book_id : int
-            更新する書籍のID
-        **kwargs
-            更新するフィールドと値のペア
-
-        Returns
-        -------
-        bool
-            更新が成功したかどうか
-        """
         allowed_fields = {
             "title",
             "series_id",
@@ -275,25 +195,6 @@ class DatabaseManager:
     def update_reading_progress(
         self, book_id, current_page=None, total_pages=None, status=None
     ):
-        """
-        読書進捗を更新する。
-
-        Parameters
-        ----------
-        book_id : int
-            書籍のID
-        current_page : int, optional
-            現在のページ
-        total_pages : int, optional
-            総ページ数
-        status : str, optional
-            読書状態 ('unread', 'reading', 'completed')
-
-        Returns
-        -------
-        bool
-            更新が成功したかどうか
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -336,23 +237,6 @@ class DatabaseManager:
         return cursor.rowcount > 0
 
     def add_series(self, name, description=None, category_id=None):
-        """
-        新しいシリーズをデータベースに追加する。
-
-        Parameters
-        ----------
-        name : str
-            シリーズ名
-        description : str, optional
-            シリーズの説明
-        category_id : int, optional
-            所属するカテゴリのID
-
-        Returns
-        -------
-        int
-            追加されたシリーズのID
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -368,19 +252,6 @@ class DatabaseManager:
         return cursor.lastrowid
 
     def get_series(self, series_id):
-        """
-        指定したIDのシリーズ情報を取得する。
-
-        Parameters
-        ----------
-        series_id : int
-            取得するシリーズのID
-
-        Returns
-        -------
-        dict
-            シリーズ情報の辞書
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -400,19 +271,6 @@ class DatabaseManager:
         return None
 
     def get_books_in_series(self, series_id):
-        """
-        指定したシリーズに属する書籍のリストを取得する。
-
-        Parameters
-        ----------
-        series_id : int
-            シリーズのID
-
-        Returns
-        -------
-        list
-            書籍情報の辞書のリスト
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -429,21 +287,18 @@ class DatabaseManager:
 
         results = [dict(row) for row in cursor.fetchall()]
 
-        # 自然順ソートを実装（数値を考慮したソート）
         import re
 
         def natural_sort_key(item):
             """
             series_orderを最優先し、次にタイトルの自然順でソート
             """
-            # series_orderがNoneの場合は最大値とする（最後に表示）
             order = (
                 item["series_order"]
                 if item["series_order"] is not None
                 else float("inf")
             )
             title = item["title"] if item["title"] else ""
-            # 数値部分を抽出して数値として扱う
             title_key = [
                 int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
             ]
@@ -453,23 +308,6 @@ class DatabaseManager:
         return sorted(results, key=natural_sort_key)
 
     def search_books(self, query=None, category_id=None, status=None):
-        """
-        条件に一致する書籍を検索する。
-
-        Parameters
-        ----------
-        query : str, optional
-            タイトル、著者、出版社などで検索するクエリ文字列
-        category_id : int, optional
-            カテゴリでフィルタリング
-        status : str, optional
-            読書状態でフィルタリング ('unread', 'reading', 'completed')
-
-        Returns
-        -------
-        list
-            書籍情報の辞書のリスト
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -499,43 +337,22 @@ class DatabaseManager:
             sql += " AND rp.status = ?"
             params.append(status)
 
-        # タイトルでソートするが、文字列のまま渡す
-        sql += " ORDER BY b.title COLLATE NOCASE"  # COLLATE NOCASEで大文字小文字を区別しない
+        sql += " ORDER BY b.title COLLATE NOCASE"
 
         cursor.execute(sql, params)
         results = [dict(row) for row in cursor.fetchall()]
 
-        # 自然順ソートを実装（数値を考慮したソート）
         import re
 
         def natural_sort_key(item):
-            """
-            文字列内の数値を数値として扱うキー関数
-            '作品A（1）'と'作品A（10）'を正しく順序付ける
-            """
             title = item["title"] if item["title"] else ""
-            # 数値部分を抽出して数値として扱う
             return [
                 int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
             ]
 
-        # 結果を自然順でソート
         return sorted(results, key=natural_sort_key)
 
     def get_category(self, category_id):
-        """
-        指定したIDのカテゴリ情報を取得する。
-
-        Parameters
-        ----------
-        category_id : int
-            取得するカテゴリのID
-
-        Returns
-        -------
-        dict または None
-            カテゴリ情報の辞書、もしくは見つからない場合はNone
-        """
         if not category_id:
             return None
 
@@ -556,14 +373,6 @@ class DatabaseManager:
         return None
 
     def get_all_categories(self):
-        """
-        すべてのカテゴリを取得する。
-
-        Returns
-        -------
-        list
-            カテゴリ情報の辞書のリスト
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -571,19 +380,6 @@ class DatabaseManager:
         return [dict(row) for row in cursor.fetchall()]
 
     def get_all_series(self, category_id=None):
-        """
-        すべてのシリーズを取得する。オプションでカテゴリでフィルタリング。
-
-        Parameters
-        ----------
-        category_id : int, optional
-            特定のカテゴリに属するシリーズのみを取得する場合のID
-
-        Returns
-        -------
-        list
-            シリーズ情報の辞書のリスト
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -604,25 +400,6 @@ class DatabaseManager:
         return [dict(row) for row in cursor.fetchall()]
 
     def set_custom_metadata(self, book_id=None, series_id=None, key=None, value=None):
-        """
-        書籍またはシリーズにカスタムメタデータを設定する。
-
-        Parameters
-        ----------
-        book_id : int, optional
-            書籍のID（書籍のメタデータを設定する場合）
-        series_id : int, optional
-            シリーズのID（シリーズのメタデータを設定する場合）
-        key : str
-            メタデータのキー
-        value : str
-            メタデータの値
-
-        Returns
-        -------
-        bool
-            設定が成功したかどうか
-        """
         if not key or (book_id is None and series_id is None):
             return False
 
@@ -683,21 +460,6 @@ class DatabaseManager:
         return True
 
     def get_custom_metadata(self, book_id=None, series_id=None):
-        """
-        書籍またはシリーズのカスタムメタデータを取得する。
-
-        Parameters
-        ----------
-        book_id : int, optional
-            書籍のID
-        series_id : int, optional
-            シリーズのID
-
-        Returns
-        -------
-        dict
-            キーと値のペアとしてのメタデータ
-        """
         if book_id is None and series_id is None:
             return {}
 
@@ -724,21 +486,6 @@ class DatabaseManager:
         return {row["key"]: row["value"] for row in cursor.fetchall()}
 
     def batch_update_metadata(self, book_ids, metadata_updates):
-        """
-        複数の書籍のメタデータを一括更新する。
-
-        Parameters
-        ----------
-        book_ids : list
-            更新する書籍IDのリスト
-        metadata_updates : dict
-            更新するメタデータのキーと値
-
-        Returns
-        -------
-        int
-            更新された書籍の数
-        """
         if not book_ids or not metadata_updates:
             return 0
 
@@ -768,7 +515,6 @@ class DatabaseManager:
 
             updated_count = cursor.rowcount
 
-        # カスタムメタデータの更新
         custom_updates = {
             k: v for k, v in metadata_updates.items() if k not in book_fields
         }
@@ -785,24 +531,6 @@ class DatabaseManager:
         )
 
     def get_books_by_category(self, category_id, **kwargs):
-        """
-        特定のカテゴリに関連する書籍を取得する。
-
-        (1) 直接そのカテゴリに属している書籍
-        (2) そのカテゴリに属するシリーズの書籍
-
-        Parameters
-        ----------
-        category_id : int
-            カテゴリID
-        **kwargs
-            その他の検索条件
-
-        Returns
-        -------
-        list
-            書籍情報の辞書のリスト
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
@@ -818,50 +546,36 @@ class DatabaseManager:
 
         params = [category_id, category_id]
 
-        # 追加の検索条件
         for key, value in kwargs.items():
             if key == "status" and value:
                 sql += " AND rp.status = ?"
                 params.append(value)
 
-        # タイトルでソート
         sql += " ORDER BY b.title COLLATE NOCASE"
 
         cursor.execute(sql, params)
         results = [dict(row) for row in cursor.fetchall()]
 
-        # 自然順ソートを実装
         import re
 
         def natural_sort_key(item):
-            """
-            文字列内の数値を数値として扱うキー関数
-            """
             title = item["title"] if item["title"] else ""
-            # 数値部分を抽出して数値として扱う
             return [
                 int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", title)
             ]
 
-        # 結果を自然順でソート
         return sorted(results, key=natural_sort_key)
 
     def migrate_database(self):
-        """
-        データベーススキーマの移行を行う。
-        新しいバージョンのアプリケーションで必要なスキーマ変更を適用する。
-        """
         conn = self.connect()
         cursor = conn.cursor()
 
         try:
-            # books テーブルに category_id カラムが存在するか確認
             cursor.execute("PRAGMA table_info(books)")
             columns = [col[1] for col in cursor.fetchall()]
 
             if "category_id" not in columns:
                 print("Migrating database: Adding category_id column to books table...")
-                # category_id カラムを追加
                 cursor.execute("""
                 ALTER TABLE books ADD COLUMN category_id INTEGER 
                 REFERENCES categories(id)

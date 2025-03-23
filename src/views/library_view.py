@@ -30,58 +30,32 @@ from models.book import Book
 
 
 class BookListItemWidget(QWidget):
-    """
-    リストビュー内の書籍アイテムのカスタムウィジェット。
-
-    Parameters
-    ----------
-    book : Book
-        表示する書籍オブジェクト
-    parent : QWidget, optional
-        親ウィジェット
-    """
-
     def __init__(self, book, parent=None):
-        """
-        Parameters
-        ----------
-        book : Book
-            書籍情報
-        parent : QWidget, optional
-            親ウィジェット
-        """
         super().__init__(parent)
 
         self.book = book
 
-        # レイアウトの設定
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
 
-        # 表紙画像
         self.cover_label = QLabel()
         self.cover_label.setFixedSize(48, 64)
         self.cover_label.setScaledContents(True)
         self.cover_label.setFrameShape(QFrame.Shape.Box)
 
-        # 初期状態ではプレースホルダー表示
         self.cover_label.setText("...")
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # 画像読み込みを遅延実行
         QTimer.singleShot(50, self.load_cover_image)
 
         layout.addWidget(self.cover_label)
 
-        # 書籍情報レイアウト
         info_layout = QVBoxLayout()
 
-        # タイトル
         self.title_label = QLabel(book.title)
         self.title_label.setStyleSheet("font-weight: bold;")
         info_layout.addWidget(self.title_label)
 
-        # 著者と出版社
         author_publisher = []
         if book.author:
             author_publisher.append(f"by {book.author}")
@@ -92,7 +66,6 @@ class BookListItemWidget(QWidget):
             self.author_label = QLabel(" ".join(author_publisher))
             info_layout.addWidget(self.author_label)
 
-        # シリーズ情報
         if book.series_id:
             series = book.db_manager.get_series(book.series_id)
             if series:
@@ -101,7 +74,7 @@ class BookListItemWidget(QWidget):
                     series_text += f" #{book.series_order}"
                 self.series_label = QLabel(series_text)
                 info_layout.addWidget(self.series_label)
-        # カテゴリ情報
+
         if book.category_id:
             self.category_label = QLabel(f"Category: {book.category_name}")
             self.category_label.setStyleSheet("color: green;")
@@ -109,7 +82,6 @@ class BookListItemWidget(QWidget):
         elif book.series_id and book.db_manager.get_series(book.series_id).get(
             "category_id"
         ):
-            # シリーズのカテゴリを表示
             series = book.db_manager.get_series(book.series_id)
             if series and series.get("category_id"):
                 category = book.db_manager.get_category(series.get("category_id"))
@@ -118,7 +90,7 @@ class BookListItemWidget(QWidget):
                         f"Category: {category['name']} (from series)"
                     )
                     info_layout.addWidget(self.category_label)
-        # 読書状態
+
         status_text = "Unread"
         if book.status == Book.STATUS_READING:
             status_text = f"Reading ({book.current_page + 1}/{book.total_pages})"
@@ -132,39 +104,22 @@ class BookListItemWidget(QWidget):
         info_layout.addWidget(self.status_label)
 
         layout.addLayout(info_layout)
-        layout.setStretch(1, 1)  # 情報部分を伸縮させる
+        layout.setStretch(1, 1)
 
     def load_cover_image(self):
-        """表紙画像を非同期で読み込む"""
         try:
-            # より小さいサムネイルサイズで取得
             cover_data = self.book.get_cover_image(thumbnail_size=(48, 64))
             if cover_data:
                 pixmap = QPixmap()
                 pixmap.loadFromData(QByteArray(cover_data))
                 self.cover_label.setPixmap(pixmap)
             else:
-                # デフォルト表紙
                 self.cover_label.setText("No Cover")
                 self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         except Exception as e:
             print(f"Error loading cover: {e}")
-            # エラー時も表示を変えない（目立たせない）
 
     def _get_status_color(self, status):
-        """
-        読書状態に応じた色を返す。
-
-        Parameters
-        ----------
-        status : str
-            読書状態
-
-        Returns
-        -------
-        str
-            色のCSSコード
-        """
         if status == Book.STATUS_UNREAD:
             return "gray"
         elif status == Book.STATUS_READING:
@@ -174,20 +129,10 @@ class BookListItemWidget(QWidget):
         return "black"
 
     def update_book_info(self, book):
-        """
-        書籍情報を更新する。
-
-        Parameters
-        ----------
-        book : Book
-            更新後の書籍情報
-        """
         self.book = book
 
-        # タイトルを更新
         self.title_label.setText(book.title)
 
-        # 著者と出版社を更新
         if hasattr(self, "author_label"):
             author_publisher = []
             if book.author:
@@ -198,7 +143,6 @@ class BookListItemWidget(QWidget):
             if author_publisher:
                 self.author_label.setText(" ".join(author_publisher))
 
-        # 読書状態を更新
         status_text = "Unread"
         if book.status == Book.STATUS_READING:
             status_text = f"Reading ({book.current_page + 1}/{book.total_pages})"
@@ -212,65 +156,36 @@ class BookListItemWidget(QWidget):
 
 
 class BookGridItemWidget(QWidget):
-    """
-    グリッドビュー内の書籍アイテムのカスタムウィジェット。
-
-    Parameters
-    ----------
-    book : Book
-        表示する書籍オブジェクト
-    parent : QWidget, optional
-        親ウィジェット
-    """
-
     def __init__(self, book, parent=None):
-        """
-        Parameters
-        ----------
-        book : Book
-            書籍情報
-        parent : QWidget, optional
-            親ウィジェット
-        """
         super().__init__(parent)
 
         self.book = book
         self.cover_loaded = False
 
-        # スタイルシートのインポート
         from utils.styles import StyleSheets
         from utils.theme import AppTheme
 
-        # 基本スタイルを適用
         self.setStyleSheet(StyleSheets.GRID_ITEM_BASE)
 
-        # レイアウト設定
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)  # 内部マージンを少し広げる
+        layout.setContentsMargins(8, 8, 8, 8)
 
-        # 表紙画像サイズを親ウィジェットから自動取得
         cover_width = (
             parent.item_width - 36 if parent and hasattr(parent, "item_width") else 180
         )
-        cover_height = int(cover_width * 4 / 3)  # 4:3アスペクト比
+        cover_height = int(cover_width * 4 / 3)
 
-        # 表紙画像
         self.cover_label = QLabel()
         self.cover_label.setFixedSize(cover_width, cover_height)
         self.cover_label.setScaledContents(True)
         self.cover_label.setFrameShape(QFrame.Shape.Box)
 
-        # 初期状態ではプレースホルダー表示
         self.cover_label.setText("Loading...")
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover_label.setStyleSheet(StyleSheets.PLACEHOLDER)
 
-        # 画像読み込みは遅延実行する（初回表示時）
-        # 明示的なロード要求まで読み込みを遅延させる
-
         layout.addWidget(self.cover_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # タイトル
         self.title_label = QLabel(self._truncate_text(book.title, 25))
         self.title_label.setStyleSheet("font-weight: bold;")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -278,21 +193,18 @@ class BookGridItemWidget(QWidget):
         self.title_label.setToolTip(book.title)
         layout.addWidget(self.title_label)
 
-        # 著者
         if book.author:
             self.author_label = QLabel(self._truncate_text(book.author, 20))
             self.author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.author_label.setToolTip(book.author)
             layout.addWidget(self.author_label)
 
-        # シリーズ情報の後にカテゴリ情報を追加
         if book.category_id:
             self.category_label = QLabel(f"Category: {book.category_name}")
             layout.addWidget(self.category_label)
         elif book.series_id and book.db_manager.get_series(book.series_id).get(
             "category_id"
         ):
-            # シリーズのカテゴリを表示
             series = book.db_manager.get_series(book.series_id)
             if series and series.get("category_id"):
                 category = book.db_manager.get_category(series.get("category_id"))
@@ -302,7 +214,6 @@ class BookGridItemWidget(QWidget):
                     )
                     layout.addWidget(self.category_label)
 
-        # 読書状態
         status_text = "Unread"
         if book.status == Book.STATUS_READING:
             progress = (
@@ -318,7 +229,6 @@ class BookGridItemWidget(QWidget):
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status_label)
 
-        # シリーズバッジ
         if book.series_id:
             series = book.db_manager.get_series(book.series_id)
             if series:
@@ -335,39 +245,11 @@ class BookGridItemWidget(QWidget):
                 layout.addWidget(self.series_badge)
 
     def _truncate_text(self, text, max_length):
-        """
-        テキストを指定した長さに切り詰める。
-
-        Parameters
-        ----------
-        text : str
-            元のテキスト
-        max_length : int
-            最大長
-
-        Returns
-        -------
-        str
-            切り詰められたテキスト
-        """
         if len(text) > max_length:
             return text[: max_length - 3] + "..."
         return text
 
     def _get_status_color(self, status):
-        """
-        読書状態に応じた色を返す。
-
-        Parameters
-        ----------
-        status : str
-            読書状態
-
-        Returns
-        -------
-        str
-            色のCSSコード
-        """
         if status == Book.STATUS_UNREAD:
             return "gray"
         elif status == Book.STATUS_READING:
@@ -377,26 +259,15 @@ class BookGridItemWidget(QWidget):
         return "black"
 
     def update_book_info(self, book):
-        """
-        書籍情報を更新する。
-
-        Parameters
-        ----------
-        book : Book
-            更新後の書籍情報
-        """
         self.book = book
 
-        # タイトルを更新
         self.title_label.setText(self._truncate_text(book.title, 25))
         self.title_label.setToolTip(book.title)
 
-        # 著者を更新
         if hasattr(self, "author_label") and book.author:
             self.author_label.setText(self._truncate_text(book.author, 20))
             self.author_label.setToolTip(book.author)
 
-        # 読書状態を更新
         status_text = "Unread"
         if book.status == Book.STATUS_READING:
             progress = (
@@ -414,12 +285,10 @@ class BookGridItemWidget(QWidget):
         )
 
     def load_cover_image(self):
-        """表紙画像を非同期で読み込む"""
         if self.cover_loaded:
             return
 
         try:
-            # 小さいサムネイルサイズで取得
             cover_data = self.book.get_cover_image(thumbnail_size=(150, 200))
             if cover_data:
                 pixmap = QPixmap()
@@ -427,7 +296,6 @@ class BookGridItemWidget(QWidget):
                 self.cover_label.setPixmap(pixmap)
                 self.cover_loaded = True
             else:
-                # デフォルト表紙
                 self.cover_label.setText("No Cover")
                 self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.cover_loaded = True
@@ -438,141 +306,99 @@ class BookGridItemWidget(QWidget):
             self.cover_loaded = True  # エラーでも読み込み完了とマーク
 
     def enterEvent(self, event):
-        """ウィジェットにマウスが入ったとき、優先的に表紙を読み込む"""
         if not self.cover_loaded:
             QTimer.singleShot(10, self.load_cover_image)
         super().enterEvent(event)
 
 
 class LibraryGridView(QScrollArea):
-    """
-    書籍をグリッド形式で表示するビュー。
-
-    Parameters
-    ----------
-    library_controller : LibraryController
-        ライブラリコントローラのインスタンス
-    parent : QWidget, optional
-        親ウィジェット
-    """
-
-    # カスタムシグナル
-    book_selected = pyqtSignal(int)  # book_id
-    books_selected = pyqtSignal(list)  # 選択された複数の book_id のリスト
+    book_selected = pyqtSignal(int)
+    books_selected = pyqtSignal(list)
 
     def __init__(self, library_controller, parent=None):
-        """コンストラクタ"""
         super().__init__(parent)
 
         self.library_controller = library_controller
 
-        # ウィジェットの設定
         self.setWidgetResizable(True)
 
-        # コンテンツウィジェット
         self.content_widget = QWidget()
         self.setWidget(self.content_widget)
 
-        # グリッドレイアウト
         self.grid_layout = QGridLayout(self.content_widget)
-        self.grid_layout.setSpacing(12)  # スペーシングを少し広げる
-        self.grid_layout.setContentsMargins(15, 15, 15, 15)  # 余白を追加
+        self.grid_layout.setSpacing(12)
+        self.grid_layout.setContentsMargins(15, 15, 15, 15)
 
-        # 表示パラメータ - フルHD環境向けに最適化
         self.min_columns = 2
         self.max_columns = 8
-        self.ideal_columns = 5  # フルHD環境での理想的な列数
+        self.ideal_columns = 5
         self.min_item_width = 160
-        self.preferred_item_width = 200  # 理想的なアイテム幅
+        self.preferred_item_width = 200
         self.max_item_width = 260
 
-        # 初期値設定
         self.grid_columns = self.ideal_columns
         self.item_width = self.preferred_item_width
 
-        # 選択中の書籍ID（単一選択時）
         self.selected_book_id = None
 
-        # 選択中の書籍IDのリスト（複数選択時）
         self.selected_book_ids = set()
 
-        # 複数選択モードかどうか
         self.multi_select_mode = False
 
-        # フィルタ設定
         self.category_filter = None
         self.status_filter = None
         self.search_query = None
 
-        # 書籍ウィジェットのマップ
         self.book_widgets = {}
 
-        # 遅延ロード関連のプロパティ
-        self.all_books = []  # 全書籍データ
-        self.loaded_count = 0  # 読み込み済み件数
-        self.batch_size = 20  # 一度に読み込む件数
-        self.is_loading = False  # 読み込み中フラグ
-        self.loading_timer = None  # 読み込みタイマー
-        self.visible_widgets = set()  # 現在表示範囲内にあるウィジェット
+        self.all_books = []
+        self.loaded_count = 0
+        self.batch_size = 20
+        self.is_loading = False
+        self.loading_timer = None
+        self.visible_widgets = set()
 
-        # グリッド列数とアイテムの標準サイズ
-        self.grid_columns = 3  # デフォルト値
-        self.item_width = 190  # 書籍アイテムの幅（ウィジェット幅+マージン）
-        self.last_viewport_width = 0  # 前回のビューポート幅を記録
+        self.grid_columns = 3
+        self.item_width = 190
+        self.last_viewport_width = 0
 
-        # スクロールイベントを監視
         self.verticalScrollBar().valueChanged.connect(self.check_scroll_position)
 
-        # 表示状態も監視（表示されたときに読み込みを最適化するため）
         self.installEventFilter(self)
 
-        # 空のプレースホルダーを配置
         self.placeholder = QLabel("Loading books...")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
         self.grid_layout.addWidget(self.placeholder, 0, 0)
 
     def resizeEvent(self, event):
-        """ウィジェットのサイズが変わったときに呼ばれる"""
         super().resizeEvent(event)
 
-        # ビューポートの現在の幅を取得
         current_width = self.viewport().width()
 
-        # 前回と同じ幅なら何もしない
         if current_width == self.last_viewport_width:
             return
 
         self.last_viewport_width = current_width
 
-        # 列数を更新して再レイアウト
         self.calculate_grid_columns()
 
-        # 書籍がロードされている場合のみ再レイアウト
         if self.book_widgets:
             self.relayout_grid()
 
     def eventFilter(self, obj, event):
-        """表示イベントをフィルタリングして、表示されたときに最適化する"""
         if event.type() == QEvent.Type.Show:
-            # 表示されたときに一度だけスクロール位置をチェック
             QTimer.singleShot(100, self.update_visible_widgets)
         return super().eventFilter(obj, event)
 
     def calculate_grid_columns(self):
-        """ビューポートの幅に基づいて列数と適切なアイテム幅を計算"""
         viewport_width = self.viewport().width()
 
-        # 利用可能な幅を計算（マージンとスクロールバー考慮）
         margins = self.grid_layout.contentsMargins()
-        available_width = (
-            viewport_width - margins.left() - margins.right() - 20
-        )  # スクロールバー
+        available_width = viewport_width - margins.left() - margins.right() - 20
 
-        # スペーシング取得
         spacing = self.grid_layout.spacing()
 
-        # 1. 希望する幅で何列表示できるか計算
         columns = max(
             self.min_columns,
             min(
@@ -581,7 +407,6 @@ class LibraryGridView(QScrollArea):
             ),
         )
 
-        # 2. その列数で最適なアイテム幅を計算
         item_width = max(
             self.min_item_width,
             min(
@@ -590,132 +415,99 @@ class LibraryGridView(QScrollArea):
             ),
         )
 
-        # 値が変わった場合のみ更新
         layout_changed = False
         if columns != self.grid_columns:
             self.grid_columns = columns
             layout_changed = True
 
-        if abs(item_width - self.item_width) > 5:  # 5px以上の差があれば更新
+        if abs(item_width - self.item_width) > 5:
             self.item_width = item_width
             layout_changed = True
 
         return layout_changed
 
     def calculate_ideal_item_width(self):
-        """ビューポートの幅に基づいて理想的なアイテム幅を計算"""
         viewport_width = self.viewport().width()
         spacing = 10
 
-        # 目標列数 (例: 4または5列が見栄えが良い)
         target_columns = 4
 
-        # 理想的なアイテム幅を計算
-        # (ビューポート幅 - 両端マージン - (列数-1)*スペーシング) ÷ 列数
         ideal_width = (
             viewport_width - 20 - (target_columns - 1) * spacing
         ) // target_columns
 
-        # 最小サイズと最大サイズの制約を適用
         min_width = 150
         max_width = 250
         return max(min_width, min(max_width, ideal_width))
 
     def relayout_grid(self):
-        """グリッドレイアウトを現在の列数で再レイアウト"""
-
-        # 現在表示されているウィジェットを取得
         widgets = []
         for book_id, widget in self.book_widgets.items():
-            # グリッドレイアウトからウィジェットを取り外す
             self.grid_layout.removeWidget(widget)
             widgets.append((book_id, widget))
 
-        # 列数に基づいて再配置
         for i, (book_id, widget) in enumerate(widgets):
             row = i // self.grid_columns
             col = i % self.grid_columns
             self.grid_layout.addWidget(widget, row, col)
 
-        # コンテンツウィジェットの更新を強制
         self.content_widget.updateGeometry()
 
-        # 表示範囲内のウィジェットを更新
         QTimer.singleShot(50, self.update_visible_widgets)
 
     def refresh(self):
-        """ライブラリを再読み込みして表示を更新する。（遅延ロード対応版）"""
-        # グリッドをクリア
         self._clear_grid()
 
-        # 遅延ロード用の変数をリセット
         self.loaded_count = 0
 
-        # プレースホルダーを表示
         self.placeholder = QLabel("Loading books...")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setStyleSheet("color: gray; font-size: 16px;")
         self.grid_layout.addWidget(self.placeholder, 0, 0)
 
-        # 非同期で書籍データを取得
         QTimer.singleShot(50, self._load_books_async)
 
     def _load_books_async(self):
-        """書籍データを非同期で読み込む"""
-        # 書籍を取得
         self.all_books = self._get_filtered_books()
 
-        # プレースホルダーを削除
         if self.placeholder.parent() == self.content_widget:
             self.placeholder.setParent(None)
             self.placeholder.deleteLater()
 
-        # 列数を計算
         self.calculate_grid_columns()
 
-        # 最初のバッチをロード
         self.load_more_books()
 
     def load_more_books(self):
-        """追加の書籍を読み込む"""
         if self.is_loading or self.loaded_count >= len(self.all_books):
             return
 
         self.is_loading = True
 
-        # 次のバッチのインデックス範囲を計算
         start_idx = self.loaded_count
         end_idx = min(start_idx + self.batch_size, len(self.all_books))
 
-        # 書籍をグリッドに配置
         for i in range(start_idx, end_idx):
             book = self.all_books[i]
             row = i // self.grid_columns
             col = i % self.grid_columns
 
-            # 書籍ウィジェットを作成
-            book_widget = BookGridItemWidget(book, self)  # selfを親として渡す
-            book_widget.setFixedWidth(self.item_width)  # 幅だけ設定
+            book_widget = BookGridItemWidget(book, self)
+            book_widget.setFixedWidth(self.item_width)
             book_widget.setCursor(Qt.CursorShape.PointingHandCursor)
             book_widget.mousePressEvent = (
                 lambda event, b=book.id: self._on_book_clicked(event, b)
             )
 
-            # グリッドに追加
             self.grid_layout.addWidget(book_widget, row, col)
 
-            # マップに追加
             self.book_widgets[book.id] = book_widget
 
-        # 読み込み済み件数を更新
         self.loaded_count = end_idx
 
-        # 読み込み中フラグをリセット
         self.is_loading = False
 
-        # すべての書籍を読み込んだか確認
         if self.loaded_count < len(self.all_books):
-            # まだ未読込の書籍があればステータスメッセージを更新
             try:
                 main_window = self.window()
                 if main_window and hasattr(main_window, "statusBar"):
@@ -723,26 +515,20 @@ class LibraryGridView(QScrollArea):
                         f"Loaded {self.loaded_count} of {len(self.all_books)} books"
                     )
             except Exception as e:
-                # ステータスバー更新でエラーが発生しても処理を続行
                 print(f"Error updating status bar: {e}")
 
-        # 表示範囲内のウィジェットの表紙を読み込む
         QTimer.singleShot(50, self.update_visible_widgets)
 
     def update_visible_widgets(self):
-        """現在表示範囲内にあるウィジェットを特定し、表紙画像を優先的に読み込む"""
         if not self.book_widgets:
             return
 
-        # スクロール領域の表示範囲を取得
         viewport_rect = self.viewport().rect()
         scrollbar_value = self.verticalScrollBar().value()
 
-        # 表示範囲を調整（スクロール位置を考慮）
         visible_top = scrollbar_value
         visible_bottom = scrollbar_value + viewport_rect.height()
 
-        # 表示範囲内のウィジェットを特定
         new_visible_widgets = set()
 
         for book_id, widget in self.book_widgets.items():
@@ -750,38 +536,28 @@ class LibraryGridView(QScrollArea):
             widget_top = widget_pos.y()
             widget_bottom = widget_top + widget.height()
 
-            # ウィジェットが表示範囲内にあるか判定
             if widget_bottom >= visible_top and widget_top <= visible_bottom:
                 new_visible_widgets.add(book_id)
 
-                # まだ表紙が読み込まれていなければ読み込む
                 if isinstance(widget, BookGridItemWidget) and not widget.cover_loaded:
-                    # 非同期で表紙を読み込む
                     QTimer.singleShot(10, widget.load_cover_image)
 
-        # 表示ウィジェットセットを更新
         self.visible_widgets = new_visible_widgets
 
     def check_scroll_position(self, value):
-        """スクロール位置をチェックして、必要なら追加の書籍を読み込む"""
-        # スクロールが下部に近づいたら追加読み込み
         scrollbar = self.verticalScrollBar()
-        if value > scrollbar.maximum() * 0.7:  # 70%以上スクロールしたら
+        if value > scrollbar.maximum() * 0.7:
             self.load_more_books()
 
-        # 表示範囲内のウィジェットを更新
-        # 連続したスクロールの場合、タイマーをリセットして最後のスクロール後に実行
         if self.loading_timer:
             self.loading_timer.stop()
 
         self.loading_timer = QTimer()
         self.loading_timer.setSingleShot(True)
         self.loading_timer.timeout.connect(self.update_visible_widgets)
-        self.loading_timer.start(100)  # 100ms後に実行（スクロール中は更新しない）
+        self.loading_timer.start(100)
 
     def _clear_grid(self):
-        """グリッドレイアウトをクリアする。"""
-        # すべての子ウィジェットを削除
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
             widget = item.widget()
@@ -794,19 +570,9 @@ class LibraryGridView(QScrollArea):
         self.visible_widgets = set()
 
     def _get_filtered_books(self):
-        """
-        フィルタ条件に基づいて書籍のリストを取得する。
-
-        Returns
-        -------
-        list
-            Book オブジェクトのリスト
-        """
         if self.search_query:
-            # 検索クエリがある場合は検索結果を返す
             base_books = self.library_controller.search_books(self.search_query)
         else:
-            # カテゴリフィルタとステータスフィルタを適用
             base_books = self.library_controller.get_all_books(
                 category_id=self.category_filter, status=self.status_filter
             )
@@ -814,30 +580,16 @@ class LibraryGridView(QScrollArea):
         return base_books
 
     def _on_book_clicked(self, event, book_id):
-        """
-        書籍クリック時の処理。
-
-        Parameters
-        ----------
-        event : QMouseEvent
-            マウスイベント
-        book_id : int
-            クリックされた書籍のID
-        """
-        # 右クリックの場合はコンテキストメニューを表示
         if event.button() == Qt.MouseButton.RightButton:
-            # PyQt6では globalPos() が非推奨になり、globalPosition().toPoint() を使用する
             global_pos = event.globalPosition().toPoint()
             self._show_context_menu(global_pos, book_id)
             return
 
-        # 複数選択モードの場合
         if self.multi_select_mode:
             ctrl_pressed = event.modifiers() & Qt.KeyboardModifier.ControlModifier
             shift_pressed = event.modifiers() & Qt.KeyboardModifier.ShiftModifier
 
             if shift_pressed and self.selected_book_ids:
-                # シフトキーが押されている場合、最後に選択したアイテムから連続選択
                 last_id = (
                     list(self.selected_book_ids)[-1]
                     if self.selected_book_ids
@@ -852,80 +604,52 @@ class LibraryGridView(QScrollArea):
                     for idx in range(start_idx, end_idx + 1):
                         self._select_book(all_ids[idx], add_to_selection=True)
                 except ValueError:
-                    # インデックスが見つからない場合は単一選択として扱う
                     if not ctrl_pressed:
                         self._clear_selection()
                     self._select_book(book_id, add_to_selection=True)
             else:
-                # Ctrlキーが押されていない場合は選択をクリア
                 if not ctrl_pressed:
                     self._clear_selection()
 
-                # 選択状態を切り替える
                 if book_id in self.selected_book_ids:
                     self._deselect_book(book_id)
                 else:
                     self._select_book(book_id, add_to_selection=True)
 
-            # 複数選択シグナルを発火
             self.books_selected.emit(list(self.selected_book_ids))
         else:
-            # 単一選択モード
             self._clear_selection()
             self._select_book(book_id)
             self.selected_book_id = book_id
             self.book_selected.emit(book_id)
 
     def set_status_filter(self, status):
-        """
-        読書状態フィルタを設定する。
-
-        Parameters
-        ----------
-        status : str または None
-            フィルタリングする読書状態、またはNone（すべて表示）
-        """
         self.status_filter = status
         self.search_query = None  # 検索クエリをクリア
         self.refresh()
 
     def _show_context_menu(self, position, book_id):
-        """
-        コンテキストメニューを表示する。
-
-        Parameters
-        ----------
-        position : QPoint
-            表示位置
-        book_id : int
-            対象の書籍ID
-        """
         menu = QMenu()
 
-        # 複数選択されているかどうかで表示内容を変更
         is_multiple_selected = len(self.selected_book_ids) > 1
 
         if is_multiple_selected and book_id in self.selected_book_ids:
-            # 複数選択のコンテキストメニュー
             selection_count = len(self.selected_book_ids)
             menu.addAction(f"{selection_count} books selected")
             menu.addSeparator()
 
-            # 一括編集
             edit_action = QAction("Edit Selected Books", self)
             edit_action.triggered.connect(
                 lambda: self._batch_edit_metadata(list(self.selected_book_ids))
             )
             menu.addAction(edit_action)
 
-            # 一括シリーズ追加
             add_to_series_action = QAction("Add Selected to Series", self)
             add_to_series_action.triggered.connect(
                 lambda: self._batch_add_to_series(list(self.selected_book_ids))
             )
             menu.addAction(add_to_series_action)
 
-            # 一括シリーズ削除
             remove_from_series_action = QAction("Remove Selected from Series", self)
             remove_from_series_action.triggered.connect(
                 lambda: self._batch_remove_from_series(list(self.selected_book_ids))
@@ -934,7 +658,6 @@ class LibraryGridView(QScrollArea):
 
             menu.addSeparator()
 
-            # 一括ステータス変更サブメニュー
             mark_action = QMenu("Mark Selected as", menu)
 
             unread_action = QAction("Unread", self)
@@ -965,14 +688,12 @@ class LibraryGridView(QScrollArea):
 
             menu.addSeparator()
 
-            # 一括削除
             remove_action = QAction("Remove Selected from Library", self)
             remove_action.triggered.connect(
                 lambda: self._batch_remove_books(list(self.selected_book_ids))
             )
             menu.addAction(remove_action)
         else:
-            # 単一選択のコンテキストメニュー
             open_action = QAction("Open", self)
             open_action.triggered.connect(lambda: self.book_selected.emit(book_id))
             menu.addAction(open_action)
@@ -1022,7 +743,6 @@ class LibraryGridView(QScrollArea):
 
             menu.addSeparator()
 
-            # 選択に追加/削除（複数選択モードの場合）
             if self.multi_select_mode:
                 if book_id in self.selected_book_ids:
                     select_action = QAction("Remove from Selection", self)
@@ -1042,39 +762,17 @@ class LibraryGridView(QScrollArea):
             remove_action.triggered.connect(lambda: self._remove_book(book_id))
             menu.addAction(remove_action)
 
-        # メニューを表示
         menu.exec(position)
 
     def _populate_grid(self, books):
-        """
-        書籍をグリッドに配置する。（遅延ロード対応版）
-
-        Parameters
-        ----------
-        books : list
-            Book オブジェクトのリスト
-        """
-        # 書籍データを保存
         self.all_books = books
 
-        # 列数を更新
         self.calculate_grid_columns()
 
-        # 最初のバッチだけ即時表示
         self.loaded_count = 0
         self.load_more_books()
 
     def _select_book(self, book_id, add_to_selection=False):
-        """
-        書籍を選択状態にする。
-
-        Parameters
-        ----------
-        book_id : int
-            選択する書籍ID
-        add_to_selection : bool
-            既存の選択に追加するかどうか
-        """
         from utils.styles import StyleSheets
 
         if book_id not in self.book_widgets:
@@ -1083,24 +781,14 @@ class LibraryGridView(QScrollArea):
         if not add_to_selection:
             self._clear_selection()
 
-        # 選択状態を設定
         self.selected_book_ids.add(book_id)
         self.book_widgets[book_id].setStyleSheet(StyleSheets.GRID_ITEM_SELECTED)
 
-        # 優先的に表紙を読み込む
         widget = self.book_widgets[book_id]
         if isinstance(widget, BookGridItemWidget) and not widget.cover_loaded:
             QTimer.singleShot(10, widget.load_cover_image)
 
     def _deselect_book(self, book_id):
-        """
-        書籍の選択を解除する。
-
-        Parameters
-        ----------
-        book_id : int
-            選択解除する書籍ID
-        """
         if book_id not in self.book_widgets:
             return
 
@@ -1109,7 +797,6 @@ class LibraryGridView(QScrollArea):
             self.book_widgets[book_id].setStyleSheet("")
 
     def _clear_selection(self):
-        """すべての選択を解除する。"""
         for book_id in list(self.selected_book_ids):
             if book_id in self.book_widgets:
                 self.book_widgets[book_id].setStyleSheet("")
@@ -1118,94 +805,31 @@ class LibraryGridView(QScrollArea):
         self.selected_book_id = None
 
     def toggle_multi_select_mode(self, enabled):
-        """
-        複数選択モードを切り替える。
-
-        Parameters
-        ----------
-        enabled : bool
-            複数選択モードを有効にするかどうか
-        """
         self.multi_select_mode = enabled
 
-        # モード切替時に選択をクリア
         self._clear_selection()
 
     def _edit_metadata(self, book_id):
-        """
-        メタデータ編集処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _batch_edit_metadata(self, book_ids):
-        """
-        複数書籍のメタデータ一括編集処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _add_to_series(self, book_id):
-        """
-        シリーズに追加処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _batch_add_to_series(self, book_ids):
-        """
-        複数書籍を一括でシリーズに追加する処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _remove_from_series(self, book_id):
-        """
-        シリーズから削除処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        """
         book = self.library_controller.get_book(book_id)
         if book and book.series_id:
-            # シリーズIDをNULLに更新
             self.library_controller.update_book_metadata(
                 book_id, series_id=None, series_order=None
             )
-            # ビューを更新
             self.update_book_item(book_id)
 
     def _batch_remove_from_series(self, book_ids):
-        """
-        複数書籍を一括でシリーズから削除する処理。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        """
         for book_id in book_ids:
             book = self.library_controller.get_book(book_id)
             if book and book.series_id:
@@ -1215,164 +839,65 @@ class LibraryGridView(QScrollArea):
                 self.update_book_item(book_id)
 
     def _mark_as_status(self, book_id, status):
-        """
-        読書状態を設定する。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        status : str
-            設定する状態
-        """
         self.library_controller.update_book_progress(book_id, status=status)
         self.update_book_item(book_id)
 
     def _batch_mark_as_status(self, book_ids, status):
-        """
-        複数書籍の読書状態を一括で設定する。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        status : str
-            設定する状態
-        """
         for book_id in book_ids:
             self.library_controller.update_book_progress(book_id, status=status)
             self.update_book_item(book_id)
 
     def _remove_book(self, book_id):
-        """
-        書籍を削除する。
-
-        Parameters
-        ----------
-        book_id : int
-            削除する書籍ID
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _batch_remove_books(self, book_ids):
-        """
-        複数書籍を一括で削除する処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_ids : list
-            削除する書籍IDリスト
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def set_category_filter(self, category_id):
-        """
-        カテゴリフィルタを設定する。
-
-        Parameters
-        ----------
-        category_id : int または None
-            フィルタリングするカテゴリID、またはNone（すべて表示）
-        """
         self.category_filter = category_id
-        self.search_query = None  # 検索クエリをクリア
+        self.search_query = None
         self.refresh()
-        # ビューが表示された時に列数を再計算
         QTimer.singleShot(50, self.ensure_correct_layout)
 
     def search(self, query):
-        """
-        書籍を検索する。
-
-        Parameters
-        ----------
-        query : str
-            検索クエリ
-        """
         self.search_query = query
         self.refresh()
-        # 検索結果表示後に列数を再計算
         QTimer.singleShot(50, self.ensure_correct_layout)
 
     def clear_search(self):
-        """検索をクリアしてすべての書籍を表示する。"""
         self.search_query = None
         self.refresh()
-        # ビュー更新後に列数を再計算
         QTimer.singleShot(50, self.ensure_correct_layout)
 
     def update_book_item(self, book_id):
-        """
-        特定の書籍アイテムを更新する。
-
-        Parameters
-        ----------
-        book_id : int
-            更新する書籍ID
-        """
         if book_id in self.book_widgets:
-            # ローカルキャッシュをクリアせずにデータベースから最新の情報を取得
             book = self.library_controller.get_book(book_id)
 
             if book:
-                # 書籍ウィジェットを更新
                 widget = self.book_widgets[book_id]
                 if isinstance(widget, BookGridItemWidget):
                     widget.update_book_info(book)
 
     def select_book(self, book_id, emit_signal=True):
-        """
-        書籍を選択状態にする。
-
-        Parameters
-        ----------
-        book_id : int
-            選択する書籍ID
-        emit_signal : bool, optional
-            選択シグナルを発火するかどうか
-        """
-        # 書籍が表示されていない場合は何もしない
         if book_id not in self.book_widgets:
             return
 
-        # 単一選択モードに切り替え
         self.multi_select_mode = False
 
-        # 選択をクリアして新しい選択を設定
         self._clear_selection()
         self._select_book(book_id)
         self.selected_book_id = book_id
 
-        # シグナルを発火（オプション）
         if emit_signal:
             self.book_selected.emit(book_id)
 
     def get_selected_book_id(self):
-        """
-        現在選択されている書籍IDを取得する。
-
-        Returns
-        -------
-        int または None
-            選択されている書籍ID、もしくは選択がない場合はNone
-        """
         return self.selected_book_id
 
     def get_selected_book_ids(self):
-        """
-        現在選択されている複数の書籍IDリストを取得する。
-
-        Returns
-        -------
-        list
-            選択されている書籍IDのリスト
-        """
         return list(self.selected_book_ids)
 
     def select_all(self):
-        """すべての表示されている書籍を選択する。"""
         self._clear_selection()
 
         for book_id in self.book_widgets:
@@ -1382,55 +907,33 @@ class LibraryGridView(QScrollArea):
             self.books_selected.emit(list(self.selected_book_ids))
 
     def ensure_correct_layout(self):
-        """現在のビューポートサイズに基づいて正しいレイアウトを確保する"""
-        # ビューポートサイズに基づいて計算
         layout_changed = self.calculate_grid_columns()
 
-        # アイテムサイズと列数の更新が必要な場合
         if layout_changed and self.book_widgets:
-            # 現在のサイズを保存
             settings = QSettings("YourOrg", "PDFLibraryManager")
             settings.setValue("grid_view/preferred_columns", self.grid_columns)
 
-            # アイテムサイズを更新
             for book_id, widget in self.book_widgets.items():
                 if hasattr(widget, "update_size"):
                     widget.update_size(self.item_width)
 
-            # グリッドレイアウトを再構成
             self.relayout_grid()
 
-            # 表示範囲内のアイテムを優先的に読み込む
             QTimer.singleShot(10, self.update_visible_widgets)
 
 
 class LibraryListView(QWidget):
-    """
-    書籍をリスト形式で表示するビュー。
-
-    Parameters
-    ----------
-    library_controller : LibraryController
-        ライブラリコントローラのインスタンス
-    parent : QWidget, optional
-        親ウィジェット
-    """
-
-    # カスタムシグナル
-    book_selected = pyqtSignal(int)  # book_id
-    books_selected = pyqtSignal(list)  # 選択された複数の book_id のリスト
+    book_selected = pyqtSignal(int)
+    books_selected = pyqtSignal(list)
 
     def __init__(self, library_controller, parent=None):
-        """コンストラクタ"""
         super().__init__(parent)
 
         self.library_controller = library_controller
 
-        # レイアウトの設定
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # リストウィジェット
         self.list_widget = QListWidget()
         self.list_widget.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
@@ -1442,194 +945,120 @@ class LibraryListView(QWidget):
         )
         layout.addWidget(self.list_widget)
 
-        # 複数選択モードかどうか
         self.multi_select_mode = False
 
-        # フィルタ設定
         self.category_filter = None
         self.status_filter = None
         self.search_query = None
 
-        # 遅延ロード関連のプロパティ
-        self.all_books = []  # 全書籍データ
-        self.loaded_count = 0  # 読み込み済み件数
-        self.batch_size = 30  # 一度に読み込む件数
-        self.is_loading = False  # 読み込み中フラグ
+        self.all_books = []
+        self.loaded_count = 0
+        self.batch_size = 30
+        self.is_loading = False
 
-        # スクロールイベントを監視
         self.list_widget.verticalScrollBar().valueChanged.connect(
             self.check_scroll_position
         )
 
-        # Loading表示用のアイテム
         self.loading_item = QListWidgetItem("Loading more books...")
         self.loading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # ライブラリを読み込む
         self.refresh()
 
     def refresh(self):
-        """ライブラリを再読み込みして表示を更新する。（遅延ロード対応版）"""
-        # リストをクリア
         self.list_widget.clear()
 
-        # 遅延ロード用の変数をリセット
         self.loaded_count = 0
 
-        # 一時的にローディングアイテムを表示
         self.list_widget.addItem("Loading books...")
 
-        # 非同期で書籍データを取得
         QTimer.singleShot(50, self._load_books_async)
 
     def _load_books_async(self):
-        """書籍データを非同期で読み込む"""
-        # 書籍を取得
         self.all_books = self._get_filtered_books()
 
-        # リストをクリア
         self.list_widget.clear()
 
-        # 最初のバッチをロード
         self.load_more_books()
 
     def load_more_books(self):
-        """追加の書籍を読み込む"""
         if self.is_loading or self.loaded_count >= len(self.all_books):
             return
 
         self.is_loading = True
-
-        # ローディングアイテムを一時的に削除
         try:
             self.list_widget.takeItem(self.list_widget.count() - 1)
         except:
             pass
 
-        # 次のバッチのインデックス範囲を計算
         start_idx = self.loaded_count
         end_idx = min(start_idx + self.batch_size, len(self.all_books))
 
-        # 書籍をリストに追加
         for i in range(start_idx, end_idx):
             book = self.all_books[i]
 
-            # リストアイテムを作成
             item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, book.id)  # 書籍IDを保存
+            item.setData(Qt.ItemDataRole.UserRole, book.id)
 
-            # カスタムウィジェットを作成
             widget = BookListItemWidget(book)
 
-            # アイテムのサイズを設定
             item.setSizeHint(widget.sizeHint())
 
-            # リストに追加
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, widget)
 
-        # まだロードする書籍が残っていれば、ローディングアイテムを追加
         if end_idx < len(self.all_books):
             self.list_widget.addItem("Loading more books...")
 
-        # 読み込み済み件数を更新
         self.loaded_count = end_idx
 
-        # 読み込み中フラグをリセット
         self.is_loading = False
 
-        # すべての書籍を読み込んだか確認
         if self.loaded_count < len(self.all_books):
-            # まだ未読込の書籍があればステータスメッセージを更新
             try:
                 if self.window() and hasattr(self.window(), "statusBar"):
                     self.window().statusBar.showMessage(
                         f"Loaded {self.loaded_count} of {len(self.all_books)} books"
                     )
             except Exception as e:
-                # ステータスバー更新でエラーが発生しても処理を続行
                 print(f"Error updating status bar: {e}")
 
     def check_scroll_position(self, value):
-        """スクロール位置をチェックして、必要なら追加の書籍を読み込む"""
-        # スクロールが下部に近づいたら追加読み込み
         scrollbar = self.list_widget.verticalScrollBar()
-        if value > scrollbar.maximum() * 0.7:  # 70%以上スクロールしたら
+        if value > scrollbar.maximum() * 0.7:
             self.load_more_books()
 
     def _populate_list(self, books):
-        """
-        書籍をリストに追加する。（遅延ロード対応版）
-
-        Parameters
-        ----------
-        books : list
-            Book オブジェクトのリスト
-        """
-        # 書籍データを保存
         self.all_books = books
 
-        # リストをクリア
         self.list_widget.clear()
 
-        # 最初のバッチをロード
         self.loaded_count = 0
         self.load_more_books()
 
     def _get_filtered_books(self):
-        """
-        フィルタ条件に基づいて書籍のリストを取得する。
-
-        Returns
-        -------
-        list
-            Book オブジェクトのリスト
-        """
         if self.search_query:
-            # 検索クエリがある場合は検索結果を返す
             return self.library_controller.search_books(self.search_query)
         else:
-            # カテゴリフィルタがある場合はそれを適用
             return self.library_controller.get_all_books(
                 category_id=self.category_filter
             )
 
     def _populate_list(self, books):
-        """
-        書籍をリストに追加する。
-
-        Parameters
-        ----------
-        books : list
-            Book オブジェクトのリスト
-        """
         for book in books:
-            # リストアイテムを作成
             item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, book.id)  # 書籍IDを保存
+            item.setData(Qt.ItemDataRole.UserRole, book.id)
 
-            # カスタムウィジェットを作成
             widget = BookListItemWidget(book)
 
-            # アイテムのサイズを設定
             item.setSizeHint(widget.sizeHint())
 
-            # リストに追加
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, widget)
 
     def toggle_multi_select_mode(self, enabled):
-        """
-        複数選択モードを切り替える。
-
-        Parameters
-        ----------
-        enabled : bool
-            複数選択モードを有効にするかどうか
-        """
         self.multi_select_mode = enabled
 
-        # 選択モードを変更
         if enabled:
             self.list_widget.setSelectionMode(
                 QAbstractItemView.SelectionMode.ExtendedSelection
@@ -1639,21 +1068,11 @@ class LibraryListView(QWidget):
                 QAbstractItemView.SelectionMode.SingleSelection
             )
 
-        # 現在の選択をクリア
         self.list_widget.clearSelection()
 
     def _on_item_clicked(self, item):
-        """
-        リストアイテムがクリックされたときの処理。
-
-        Parameters
-        ----------
-        item : QListWidgetItem
-            クリックされたアイテム
-        """
         book_id = item.data(Qt.ItemDataRole.UserRole)
 
-        # 複数選択モードの場合
         if self.multi_select_mode:
             selected_items = self.list_widget.selectedItems()
             selected_ids = [
@@ -1661,49 +1080,26 @@ class LibraryListView(QWidget):
             ]
             self.books_selected.emit(selected_ids)
         else:
-            # 単一選択モード
             self.book_selected.emit(book_id)
 
     def _on_context_menu_requested(self, position):
-        """
-        コンテキストメニューが要求されたときの処理。
-
-        Parameters
-        ----------
-        position : QPoint
-            要求位置
-        """
         item = self.list_widget.itemAt(position)
         if item:
             book_id = item.data(Qt.ItemDataRole.UserRole)
             global_pos = self.list_widget.mapToGlobal(position)
 
-            # 複数選択されているか確認
             selected_items = self.list_widget.selectedItems()
             if len(selected_items) > 1 and item in selected_items:
-                # 複数選択のコンテキストメニュー
                 selected_ids = [
                     item.data(Qt.ItemDataRole.UserRole) for item in selected_items
                 ]
                 self._show_batch_context_menu(global_pos, selected_ids)
             else:
-                # 単一選択のコンテキストメニュー
                 self._show_context_menu(global_pos, book_id)
 
     def _show_context_menu(self, position, book_id):
-        """
-        コンテキストメニューを表示する。
-
-        Parameters
-        ----------
-        position : QPoint
-            表示位置
-        book_id : int
-            対象の書籍ID
-        """
         menu = QMenu()
 
-        # メニューアクションを追加
         open_action = QAction("Open", self)
         open_action.triggered.connect(lambda: self.book_selected.emit(book_id))
         menu.addAction(open_action)
@@ -1756,40 +1152,25 @@ class LibraryListView(QWidget):
         remove_action.triggered.connect(lambda: self._remove_book(book_id))
         menu.addAction(remove_action)
 
-        # メニューを表示
         menu.exec(position)
 
     def _show_batch_context_menu(self, position, book_ids):
-        """
-        複数選択時のコンテキストメニューを表示する。
-
-        Parameters
-        ----------
-        position : QPoint
-            表示位置
-        book_ids : list
-            選択された書籍IDのリスト
-        """
         menu = QMenu()
 
-        # 選択数を表示
         selection_count = len(book_ids)
         menu.addAction(f"{selection_count} books selected")
         menu.addSeparator()
 
-        # 一括編集
         edit_action = QAction("Edit Selected Books", self)
         edit_action.triggered.connect(lambda: self._batch_edit_metadata(book_ids))
         menu.addAction(edit_action)
 
-        # 一括シリーズ追加
         add_to_series_action = QAction("Add Selected to Series", self)
         add_to_series_action.triggered.connect(
             lambda: self._batch_add_to_series(book_ids)
         )
         menu.addAction(add_to_series_action)
 
-        # 一括シリーズ削除
         remove_from_series_action = QAction("Remove Selected from Series", self)
         remove_from_series_action.triggered.connect(
             lambda: self._batch_remove_from_series(book_ids)
@@ -1798,7 +1179,6 @@ class LibraryListView(QWidget):
 
         menu.addSeparator()
 
-        # 一括ステータス変更
         mark_action = QMenu("Mark Selected as", menu)
 
         unread_action = QAction("Unread", self)
@@ -1823,85 +1203,31 @@ class LibraryListView(QWidget):
 
         menu.addSeparator()
 
-        # 一括削除
         remove_action = QAction("Remove Selected from Library", self)
         remove_action.triggered.connect(lambda: self._batch_remove_books(book_ids))
         menu.addAction(remove_action)
 
-        # メニューを表示
         menu.exec(position)
 
     def _edit_metadata(self, book_id):
-        """
-        メタデータ編集処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _batch_edit_metadata(self, book_ids):
-        """
-        複数書籍のメタデータ一括編集処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _add_to_series(self, book_id):
-        """
-        シリーズに追加処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _batch_add_to_series(self, book_ids):
-        """
-        複数書籍を一括でシリーズに追加する処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _remove_from_series(self, book_id):
-        """
-        シリーズから削除処理。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        """
         self.library_controller.update_book_metadata(
             book_id, series_id=None, series_order=None
         )
         self.update_book_item(book_id)
 
     def _batch_remove_from_series(self, book_ids):
-        """
-        複数書籍を一括でシリーズから削除する処理。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        """
         for book_id in book_ids:
             book = self.library_controller.get_book(book_id)
             if book and book.series_id:
@@ -1911,102 +1237,37 @@ class LibraryListView(QWidget):
                 self.update_book_item(book_id)
 
     def _mark_as_status(self, book_id, status):
-        """
-        読書状態を設定する。
-
-        Parameters
-        ----------
-        book_id : int
-            対象の書籍ID
-        status : str
-            設定する状態
-        """
         self.library_controller.update_book_progress(book_id, status=status)
         self.update_book_item(book_id)
 
     def _batch_mark_as_status(self, book_ids, status):
-        """
-        複数書籍の読書状態を一括で設定する。
-
-        Parameters
-        ----------
-        book_ids : list
-            対象の書籍IDリスト
-        status : str
-            設定する状態
-        """
         for book_id in book_ids:
             self.library_controller.update_book_progress(book_id, status=status)
             self.update_book_item(book_id)
 
     def _remove_book(self, book_id):
-        """
-        書籍を削除する（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_id : int
-            削除する書籍ID
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def _batch_remove_books(self, book_ids):
-        """
-        複数書籍を一括で削除する処理（シグナル接続先のプレースホルダ）。
-
-        Parameters
-        ----------
-        book_ids : list
-            削除する書籍IDリスト
-        """
-        # 実際の処理はメインウィンドウで実装される
         pass
 
     def set_category_filter(self, category_id):
-        """
-        カテゴリフィルタを設定する。
-
-        Parameters
-        ----------
-        category_id : int または None
-            フィルタリングするカテゴリID、またはNone（すべて表示）
-        """
         self.category_filter = category_id
-        self.search_query = None  # 検索クエリをクリア
+        self.search_query = None
         self.refresh()
 
     def search(self, query):
-        """
-        書籍を検索する。
-
-        Parameters
-        ----------
-        query : str
-            検索クエリ
-        """
         self.search_query = query
         self.refresh()
 
     def clear_search(self):
-        """検索をクリアしてすべての書籍を表示する。"""
         self.search_query = None
         self.refresh()
 
     def update_book_item(self, book_id):
-        """
-        特定の書籍アイテムを更新する。
-
-        Parameters
-        ----------
-        book_id : int
-            更新する書籍ID
-        """
-        # book_idに一致するアイテムを検索
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             if item.data(Qt.ItemDataRole.UserRole) == book_id:
-                # 書籍情報を更新
                 book = self.library_controller.get_book(book_id)
                 if book:
                     widget = self.list_widget.itemWidget(item)
@@ -2015,84 +1276,40 @@ class LibraryListView(QWidget):
                 break
 
     def select_book(self, book_id, emit_signal=True):
-        """
-        書籍を選択状態にする。
-
-        Parameters
-        ----------
-        book_id : int
-            選択する書籍ID
-        emit_signal : bool, optional
-            選択シグナルを発火するかどうか
-        """
-        # 単一選択モードに戻す
         self.toggle_multi_select_mode(False)
 
-        # book_idに一致するアイテムを検索
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             if item.data(Qt.ItemDataRole.UserRole) == book_id:
-                # アイテムを選択
                 self.list_widget.setCurrentItem(item)
 
-                # シグナルを発火（オプション）
                 if emit_signal:
                     self.book_selected.emit(book_id)
                 break
 
     def get_selected_book_id(self):
-        """
-        現在選択されている書籍IDを取得する（単一選択モード）。
-
-        Returns
-        -------
-        int または None
-            選択されている書籍ID、もしくは選択がない場合はNone
-        """
         current_item = self.list_widget.currentItem()
         if current_item:
             return current_item.data(Qt.ItemDataRole.UserRole)
         return None
 
     def get_selected_book_ids(self):
-        """
-        現在選択されている複数の書籍IDリストを取得する。
-
-        Returns
-        -------
-        list
-            選択されている書籍IDのリスト
-        """
         selected_items = self.list_widget.selectedItems()
         return [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
 
     def select_all(self):
-        """すべての表示されている書籍を選択する。"""
-        # 複数選択モードを有効化
         self.toggle_multi_select_mode(True)
 
-        # すべてのアイテムを選択
         self.list_widget.selectAll()
 
-        # シグナルを発火
         selected_ids = self.get_selected_book_ids()
         if selected_ids:
             self.books_selected.emit(selected_ids)
 
     def _get_filtered_books(self):
-        """
-        フィルタ条件に基づいて書籍のリストを取得する。
-
-        Returns
-        -------
-        list
-            Book オブジェクトのリスト
-        """
         if self.search_query:
-            # 検索クエリがある場合は検索結果を返す
             base_books = self.library_controller.search_books(self.search_query)
         else:
-            # カテゴリフィルタとステータスフィルタを適用
             base_books = self.library_controller.get_all_books(
                 category_id=self.category_filter, status=self.status_filter
             )
@@ -2100,14 +1317,6 @@ class LibraryListView(QWidget):
         return base_books
 
     def set_status_filter(self, status):
-        """
-        読書状態フィルタを設定する。
-
-        Parameters
-        ----------
-        status : str または None
-            フィルタリングする読書状態、またはNone（すべて表示）
-        """
         self.status_filter = status
         self.search_query = None  # 検索クエリをクリア
         self.refresh()

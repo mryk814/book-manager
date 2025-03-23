@@ -24,77 +24,51 @@ from PyQt6.QtWidgets import (
 
 
 class SettingsDialog(QDialog):
-    """
-    アプリケーション設定ダイアログ。
-
-    PDFライブラリの表示オプション、パス設定などを管理する。
-
-    Parameters
-    ----------
-    parent : QWidget, optional
-        親ウィジェット
-    """
-
     def __init__(self, parent=None):
-        """
-        Parameters
-        ----------
-        parent : QWidget, optional
-            親ウィジェット
-        """
         super().__init__(parent)
 
         self.setWindowTitle("Settings")
         self.setMinimumWidth(500)
         self.setMinimumHeight(400)
 
-        # デフォルト設定を定義
         self.default_settings = {
             "general": {"startup_show_last_book": True, "confirm_delete": True},
             "appearance": {
                 "grid_columns": 3,
                 "grid_cover_size": 120,
                 "list_cover_size": 48,
-                "default_view": "grid",  # or "list"
+                "default_view": "grid",
             },
             "paths": {"default_import_path": "", "database_path": "library.db"},
             "reading": {
-                "default_zoom": 100,  # パーセント
-                "page_turn_mode": "continuous",  # or "single"
+                "default_zoom": 100,
+                "page_turn_mode": "continuous",
             },
         }
 
-        # 設定を読み込む
         self.settings = self.load_settings()
 
-        # レイアウトの設定
         self.layout = QVBoxLayout(self)
 
-        # タブウィジェットの作成
         self.tab_widget = QTabWidget()
         self.layout.addWidget(self.tab_widget)
 
-        # 一般設定タブ
         self.general_tab = QWidget()
         self.tab_widget.addTab(self.general_tab, "General")
         self.setup_general_tab()
 
-        # 外観設定タブ
         self.appearance_tab = QWidget()
         self.tab_widget.addTab(self.appearance_tab, "Appearance")
         self.setup_appearance_tab()
 
-        # パス設定タブ
         self.paths_tab = QWidget()
         self.tab_widget.addTab(self.paths_tab, "Paths")
         self.setup_paths_tab()
 
-        # 読書設定タブ
         self.reading_tab = QWidget()
         self.tab_widget.addTab(self.reading_tab, "Reading")
         self.setup_reading_tab()
 
-        # ボタン
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -111,18 +85,14 @@ class SettingsDialog(QDialog):
         )
         self.layout.addWidget(self.button_box)
 
-        # 設定の適用（ダイアログが閉じられるときに呼ばれる）
         self.accepted.connect(self.apply_settings)
 
     def setup_general_tab(self):
-        """一般設定タブを設定する。"""
         layout = QVBoxLayout(self.general_tab)
 
-        # 一般設定グループ
         general_group = QGroupBox("General Options")
         general_layout = QFormLayout(general_group)
 
-        # 起動時に最後に表示していた書籍を表示するかどうか
         self.startup_show_last_book = QCheckBox()
         self.startup_show_last_book.setChecked(
             self.settings["general"]["startup_show_last_book"]
@@ -131,7 +101,6 @@ class SettingsDialog(QDialog):
             "Show last opened book at startup:", self.startup_show_last_book
         )
 
-        # 削除時に確認するかどうか
         self.confirm_delete = QCheckBox()
         self.confirm_delete.setChecked(self.settings["general"]["confirm_delete"])
         general_layout.addRow("Confirm before deleting books:", self.confirm_delete)
@@ -140,21 +109,17 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
 
     def setup_appearance_tab(self):
-        """外観設定タブを設定する。"""
         layout = QVBoxLayout(self.appearance_tab)
 
-        # グリッドビュー設定グループ
         grid_group = QGroupBox("Grid View")
         grid_layout = QFormLayout(grid_group)
 
-        # グリッドカラム数
         self.grid_columns = QSpinBox()
         self.grid_columns.setMinimum(1)
         self.grid_columns.setMaximum(10)
         self.grid_columns.setValue(self.settings["appearance"]["grid_columns"])
         grid_layout.addRow("Number of columns:", self.grid_columns)
 
-        # グリッド表紙サイズ
         self.grid_cover_size = QSpinBox()
         self.grid_cover_size.setMinimum(50)
         self.grid_cover_size.setMaximum(300)
@@ -163,11 +128,9 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(grid_group)
 
-        # リストビュー設定グループ
         list_group = QGroupBox("List View")
         list_layout = QFormLayout(list_group)
 
-        # リスト表紙サイズ
         self.list_cover_size = QSpinBox()
         self.list_cover_size.setMinimum(20)
         self.list_cover_size.setMaximum(100)
@@ -176,11 +139,9 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(list_group)
 
-        # 一般外観設定
         appearance_group = QGroupBox("General Appearance")
         appearance_layout = QFormLayout(appearance_group)
 
-        # デフォルトビュー
         self.default_view = QComboBox()
         self.default_view.addItems(["Grid View", "List View"])
         current_view = (
@@ -195,14 +156,11 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
 
     def setup_paths_tab(self):
-        """パス設定タブを設定する。"""
         layout = QVBoxLayout(self.paths_tab)
 
-        # パス設定グループ
         paths_group = QGroupBox("File Paths")
         paths_layout = QFormLayout(paths_group)
 
-        # デフォルトインポートパス
         import_path_layout = QHBoxLayout()
         self.default_import_path = QLineEdit(
             self.settings["paths"]["default_import_path"]
@@ -215,7 +173,6 @@ class SettingsDialog(QDialog):
 
         paths_layout.addRow("Default import path:", import_path_layout)
 
-        # データベースパス
         db_path_layout = QHBoxLayout()
         self.database_path = QLineEdit(self.settings["paths"]["database_path"])
         db_path_layout.addWidget(self.database_path)
@@ -228,21 +185,17 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(paths_group)
 
-        # データベース操作グループ
         db_group = QGroupBox("Database Operations")
         db_layout = QVBoxLayout(db_group)
 
-        # バックアップボタン
         self.backup_button = QPushButton("Backup Database...")
         self.backup_button.clicked.connect(self.backup_database)
         db_layout.addWidget(self.backup_button)
 
-        # 復元ボタン
         self.restore_button = QPushButton("Restore Database...")
         self.restore_button.clicked.connect(self.restore_database)
         db_layout.addWidget(self.restore_button)
 
-        # 警告ラベル
         self.warning_label = QLabel(
             "Warning: Restoring a database will replace all current data!"
         )
@@ -253,14 +206,11 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
 
     def setup_reading_tab(self):
-        """読書設定タブを設定する。"""
         layout = QVBoxLayout(self.reading_tab)
 
-        # 読書設定グループ
         reading_group = QGroupBox("Reading Options")
         reading_layout = QFormLayout(reading_group)
 
-        # デフォルトズーム
         self.default_zoom = QSpinBox()
         self.default_zoom.setMinimum(50)
         self.default_zoom.setMaximum(300)
@@ -268,7 +218,6 @@ class SettingsDialog(QDialog):
         self.default_zoom.setValue(self.settings["reading"]["default_zoom"])
         reading_layout.addRow("Default zoom level:", self.default_zoom)
 
-        # ページめくりモード
         self.page_turn_mode = QComboBox()
         self.page_turn_mode.addItems(["Continuous", "Single Page"])
         current_mode = (
@@ -283,7 +232,6 @@ class SettingsDialog(QDialog):
         layout.addStretch(1)
 
     def browse_for_import_path(self):
-        """インポートパス用のフォルダ選択ダイアログを表示する。"""
         folder_path = QFileDialog.getExistingDirectory(
             self, "Select Default Import Directory", self.default_import_path.text()
         )
@@ -291,7 +239,6 @@ class SettingsDialog(QDialog):
             self.default_import_path.setText(folder_path)
 
     def browse_for_db_path(self):
-        """データベースパス用のファイル選択ダイアログを表示する。"""
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Select Database File",
@@ -302,7 +249,6 @@ class SettingsDialog(QDialog):
             self.database_path.setText(file_path)
 
     def backup_database(self):
-        """データベースをバックアップする。"""
         source_path = self.database_path.text()
         if not os.path.isfile(source_path):
             QMessageBox.warning(
@@ -310,7 +256,6 @@ class SettingsDialog(QDialog):
             )
             return
 
-        # バックアップ先を選択
         backup_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Database Backup",
@@ -322,7 +267,6 @@ class SettingsDialog(QDialog):
             return
 
         try:
-            # ファイルをコピー
             import shutil
 
             shutil.copy2(source_path, backup_path)
@@ -336,7 +280,6 @@ class SettingsDialog(QDialog):
             )
 
     def restore_database(self):
-        """データベースを復元する。"""
         # 確認ダイアログ
         result = QMessageBox.warning(
             self,
@@ -360,19 +303,12 @@ class SettingsDialog(QDialog):
         target_path = self.database_path.text()
 
         try:
-            # ファイルをコピー
             import shutil
 
-            # 既存のデータベースが開かれていないことを確認
-            # この部分はメインウィンドウと連携が必要
-            # 今回は簡易的に実装
-
-            # バックアップを作成
             if os.path.isfile(target_path):
                 backup_path = f"{target_path}.bak"
                 shutil.copy2(target_path, backup_path)
 
-            # 復元
             shutil.copy2(source_path, target_path)
 
             QMessageBox.information(
@@ -381,8 +317,6 @@ class SettingsDialog(QDialog):
                 f"Database has been restored. The application will now restart to apply changes.",
             )
 
-            # 本来ならアプリケーションを再起動するべき
-            # ここでは簡易的にダイアログを閉じるだけ
             self.accept()
 
         except Exception as e:
@@ -391,14 +325,11 @@ class SettingsDialog(QDialog):
             )
 
     def apply_settings(self):
-        """設定を適用する。"""
-        # 一般設定
         self.settings["general"]["startup_show_last_book"] = (
             self.startup_show_last_book.isChecked()
         )
         self.settings["general"]["confirm_delete"] = self.confirm_delete.isChecked()
 
-        # 外観設定
         self.settings["appearance"]["grid_columns"] = self.grid_columns.value()
         self.settings["appearance"]["grid_cover_size"] = self.grid_cover_size.value()
         self.settings["appearance"]["list_cover_size"] = self.list_cover_size.value()
@@ -406,11 +337,9 @@ class SettingsDialog(QDialog):
             "grid" if self.default_view.currentText() == "Grid View" else "list"
         )
 
-        # パス設定
         self.settings["paths"]["default_import_path"] = self.default_import_path.text()
         self.settings["paths"]["database_path"] = self.database_path.text()
 
-        # 読書設定
         self.settings["reading"]["default_zoom"] = self.default_zoom.value()
         self.settings["reading"]["page_turn_mode"] = (
             "continuous"
@@ -418,12 +347,9 @@ class SettingsDialog(QDialog):
             else "single"
         )
 
-        # 設定を保存
         self.save_settings()
 
     def reset_to_defaults(self):
-        """設定をデフォルトにリセットする。"""
-        # 確認ダイアログ
         result = QMessageBox.question(
             self,
             "Reset to Defaults",
@@ -435,10 +361,8 @@ class SettingsDialog(QDialog):
         if result != QMessageBox.StandardButton.Yes:
             return
 
-        # 設定をデフォルトに戻す
         self.settings = self.default_settings.copy()
 
-        # UI要素を更新
         self.startup_show_last_book.setChecked(
             self.settings["general"]["startup_show_last_book"]
         )
@@ -461,14 +385,6 @@ class SettingsDialog(QDialog):
         )
 
     def load_settings(self):
-        """
-        設定ファイルから設定を読み込む。
-
-        Returns
-        -------
-        dict
-            設定の辞書
-        """
         settings_path = self.get_settings_path()
 
         if os.path.isfile(settings_path):
@@ -476,7 +392,6 @@ class SettingsDialog(QDialog):
                 with open(settings_path, "r", encoding="utf-8") as f:
                     loaded_settings = json.load(f)
 
-                # デフォルト設定と結合（欠けている設定をデフォルトで補完）
                 settings = self.default_settings.copy()
                 self.merge_settings(settings, loaded_settings)
                 return settings
@@ -486,14 +401,11 @@ class SettingsDialog(QDialog):
         return self.default_settings.copy()
 
     def save_settings(self):
-        """設定をファイルに保存する。"""
         settings_path = self.get_settings_path()
 
         try:
-            # 設定ディレクトリを作成
             os.makedirs(os.path.dirname(settings_path), exist_ok=True)
 
-            # 設定を保存
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, indent=4)
 
@@ -504,55 +416,30 @@ class SettingsDialog(QDialog):
             )
 
     def get_settings_path(self):
-        """
-        設定ファイルのパスを取得する。
-
-        Returns
-        -------
-        str
-            設定ファイルの絶対パス
-        """
-        # 設定ファイルの場所はOS依存
-        # Windows: %APPDATA%\PDFLibraryManager\settings.json
-        # macOS: ~/Library/Application Support/PDFLibraryManager/settings.json
-        # Linux: ~/.config/PDFLibraryManager/settings.json
         app_name = "PDFLibraryManager"
 
-        if os.name == "nt":  # Windows
+        if os.name == "nt":
             app_data = os.getenv("APPDATA")
             return os.path.join(app_data, app_name, "settings.json")
-        elif os.name == "posix":  # macOS / Linux
+        elif os.name == "posix":
             if os.path.exists(
                 os.path.expanduser("~/Library/Application Support")
             ):  # macOS
                 return os.path.expanduser(
                     f"~/Library/Application Support/{app_name}/settings.json"
                 )
-            else:  # Linux
+            else:
                 return os.path.expanduser(f"~/.config/{app_name}/settings.json")
         else:
-            # その他のOSはカレントディレクトリに
             return os.path.join(os.getcwd(), f"{app_name}_settings.json")
 
     def merge_settings(self, target, source):
-        """
-        設定を再帰的にマージする。
-
-        Parameters
-        ----------
-        target : dict
-            ターゲット辞書（更新される）
-        source : dict
-            ソース辞書（更新内容）
-        """
         for key, value in source.items():
             if (
                 key in target
                 and isinstance(target[key], dict)
                 and isinstance(value, dict)
             ):
-                # 両方辞書の場合は再帰的にマージ
                 self.merge_settings(target[key], value)
             elif key in target:
-                # その他の場合は上書き
                 target[key] = value

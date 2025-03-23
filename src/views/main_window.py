@@ -582,27 +582,67 @@ class MainWindow(QMainWindow):
         self.reader_layout.addWidget(self.reader_view)
 
     def setup_context_menu_handlers(self):
-        self.grid_view._edit_metadata = self.show_metadata_editor
-        self.grid_view._batch_edit_metadata = self.show_batch_metadata_editor
-        self.grid_view._add_to_series = self.show_add_to_series_dialog
-        self.grid_view._batch_add_to_series = self.show_batch_add_to_series_dialog
-        self.grid_view._batch_remove_from_series = self.batch_remove_from_series
-        self.grid_view._remove_book = self.remove_book
-        self.grid_view._batch_remove_books = self.batch_remove_books
+        from controllers.context_menu_controller import ContextMenuController
 
-        self.list_view._edit_metadata = self.show_metadata_editor
-        self.list_view._batch_edit_metadata = self.show_batch_metadata_editor
-        self.list_view._add_to_series = self.show_add_to_series_dialog
-        self.list_view._batch_add_to_series = self.show_batch_add_to_series_dialog
-        self.list_view._batch_remove_from_series = self.batch_remove_from_series
-        self.list_view._remove_book = self.remove_book
-        self.list_view._batch_remove_books = self.batch_remove_books
+        self.context_menu_controller = ContextMenuController(
+            self.library_controller, self
+        )
 
-        self.series_grid_view._edit_series = self.show_series_editor
-        self.series_grid_view._remove_series = self.remove_series
+        self.grid_view._edit_metadata = self.context_menu_controller.edit_metadata
+        self.grid_view._batch_edit_metadata = (
+            self.context_menu_controller.batch_edit_metadata
+        )
+        self.grid_view._add_to_series = self.context_menu_controller.add_to_series
+        self.grid_view._batch_add_to_series = (
+            self.context_menu_controller.batch_add_to_series
+        )
+        self.grid_view._remove_from_series = (
+            self.context_menu_controller.remove_from_series
+        )
+        self.grid_view._batch_remove_from_series = (
+            self.context_menu_controller.batch_remove_from_series
+        )
+        self.grid_view._mark_as_status = self.context_menu_controller.mark_as_status
+        self.grid_view._batch_mark_as_status = (
+            self.context_menu_controller.batch_mark_as_status
+        )
+        self.grid_view._remove_book = self.context_menu_controller.remove_book
+        self.grid_view._batch_remove_books = (
+            self.context_menu_controller.batch_remove_books
+        )
 
-        self.series_list_view._edit_series = self.show_series_editor
-        self.series_list_view._remove_series = self.remove_series
+        self.list_view._edit_metadata = self.context_menu_controller.edit_metadata
+        self.list_view._batch_edit_metadata = (
+            self.context_menu_controller.batch_edit_metadata
+        )
+        self.list_view._add_to_series = self.context_menu_controller.add_to_series
+        self.list_view._batch_add_to_series = (
+            self.context_menu_controller.batch_add_to_series
+        )
+        self.list_view._remove_from_series = (
+            self.context_menu_controller.remove_from_series
+        )
+        self.list_view._batch_remove_from_series = (
+            self.context_menu_controller.batch_remove_from_series
+        )
+        self.list_view._mark_as_status = self.context_menu_controller.mark_as_status
+        self.list_view._batch_mark_as_status = (
+            self.context_menu_controller.batch_mark_as_status
+        )
+        self.list_view._remove_book = self.context_menu_controller.remove_book
+        self.list_view._batch_remove_books = (
+            self.context_menu_controller.batch_remove_books
+        )
+
+        self.series_grid_view._edit_series = self.context_menu_controller.edit_series
+        self.series_grid_view._remove_series = (
+            self.context_menu_controller.remove_series
+        )
+
+        self.series_list_view._edit_series = self.context_menu_controller.edit_series
+        self.series_list_view._remove_series = (
+            self.context_menu_controller.remove_series
+        )
 
     def setup_connections(self):
         self.grid_view.book_selected.connect(self.on_book_selected)

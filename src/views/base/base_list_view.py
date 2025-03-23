@@ -2,12 +2,12 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QVBoxLayout
 
 from utils.ui_utils import show_error_dialog
-from views.base.base_view import BaseView
+from views.base.item_view import ItemView
 
 
-class BaseListView(BaseView):
-    def __init__(self, library_controller, parent=None):
-        super().__init__(library_controller, parent)
+class BaseListView(ItemView):
+    def __init__(self, controller, parent=None):
+        super().__init__(controller, parent)
 
         self._init_ui()
 

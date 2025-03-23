@@ -4,38 +4,11 @@ from pathlib import Path
 
 
 class SettingsManager:
-    """
-    アプリケーション設定を管理するクラス。
-
-    設定の読み込み、保存、マージ操作など、設定に関する実際の処理を担当する。
-    AppConfigクラスから設定管理の責務を分離するために導入。
-
-    Parameters
-    ----------
-    app_data_dir : str or Path, optional
-        設定ファイルを保存するディレクトリ
-    """
-
     def __init__(self, app_data_dir=None):
-        """
-        Parameters
-        ----------
-        app_data_dir : str or Path, optional
-            設定ファイルを保存するディレクトリ
-            指定しない場合はデフォルトのアプリデータディレクトリを使用
-        """
         self.app_data_dir = app_data_dir or self.get_default_app_data_dir()
 
     @staticmethod
     def get_default_app_data_dir():
-        """
-        アプリケーションデータディレクトリのパスを取得する。
-
-        Returns
-        -------
-        Path
-            データディレクトリのパス
-        """
         app_name = "PDFLibraryManager"
 
         if os.name == "nt":  # Windows
@@ -55,30 +28,9 @@ class SettingsManager:
             return Path(os.getcwd()) / f".{app_name}"
 
     def get_settings_path(self):
-        """
-        設定ファイルのパスを取得する。
-
-        Returns
-        -------
-        Path
-            設定ファイルのパス
-        """
         return self.app_data_dir / "settings.json"
 
     def load_settings(self, default_settings):
-        """
-        設定ファイルから設定を読み込む。
-
-        Parameters
-        ----------
-        default_settings : dict
-            デフォルト設定の辞書
-
-        Returns
-        -------
-        dict
-            設定の辞書
-        """
         settings_path = self.get_settings_path()
 
         if settings_path.exists():
@@ -104,19 +56,6 @@ class SettingsManager:
         return default_settings.copy()
 
     def save_settings(self, settings):
-        """
-        設定をファイルに保存する。
-
-        Parameters
-        ----------
-        settings : dict
-            保存する設定の辞書
-
-        Returns
-        -------
-        bool
-            保存が成功したかどうか
-        """
         settings_path = self.get_settings_path()
 
         try:
@@ -133,16 +72,6 @@ class SettingsManager:
             return False
 
     def merge_settings(self, target, source):
-        """
-        設定を再帰的にマージする。
-
-        Parameters
-        ----------
-        target : dict
-            ターゲット辞書（更新される）
-        source : dict
-            ソース辞書（更新内容）
-        """
         for key, value in source.items():
             if (
                 key in target

@@ -1,5 +1,6 @@
 from models.book import Book
 from models.series import Series
+from repositories.book_repository import BookRepository
 
 
 class SearchController:
@@ -22,6 +23,7 @@ class SearchController:
             データベース接続マネージャ
         """
         self.db_manager = db_manager
+        self.book_repository = BookRepository(db_manager)
 
     def search_books(self, query, filters=None):
         """
@@ -42,7 +44,7 @@ class SearchController:
         if filters is None:
             filters = {}
 
-        book_data_list = self.db_manager.search_books(query=query, **filters)
+        book_data_list = self.book_repository.search(query, **filters)
         return [Book(book_data, self.db_manager) for book_data in book_data_list]
 
     def search_series(self, query, category_id=None):
@@ -62,18 +64,19 @@ class SearchController:
             検索結果のシリーズリスト
         """
         # シリーズを取得
-        series_list = self.db_manager.get_all_series(category_id)
+        from controllers.series_controller import SeriesController
+
+        series_controller = SeriesController(self.db_manager)
+        series_list = series_controller.get_all_series(category_id)
 
         if not query:
-            return [Series(series_data, self.db_manager) for series_data in series_list]
+            return series_list
 
         # クエリで絞り込み
         query = query.lower()
         filtered_list = []
 
-        for series_data in series_list:
-            series = Series(series_data, self.db_manager)
-
+        for series in series_list:
             # シリーズ名で検索
             if query in series.name.lower():
                 filtered_list.append(series)
@@ -106,7 +109,10 @@ class SearchController:
         list
             検索結果のカテゴリリスト
         """
-        all_categories = self.db_manager.get_all_categories()
+        from controllers.category_controller import CategoryController
+
+        category_controller = CategoryController(self.db_manager)
+        all_categories = category_controller.get_all_categories()
 
         if not query:
             return all_categories
@@ -134,53 +140,53 @@ class SearchController:
         list
             検索結果の書籍リスト
         """
-        # SQL文を動的に構築
-        sql = """
+        sql_parts = [
+            """
             SELECT b.*, rp.status, rp.current_page, s.name as series_name, c.name as category_name
             FROM books b
             LEFT JOIN reading_progress rp ON b.id = rp.book_id
             LEFT JOIN series s ON b.series_id = s.id
             LEFT JOIN categories c ON b.category_id = c.id OR s.category_id = c.id
             WHERE 1=1
-        """
-
+            """
+        ]
         params = []
 
         # 各検索条件を追加
         if "title" in criteria and criteria["title"]:
-            sql += " AND b.title LIKE ?"
+            sql_parts.append("AND b.title LIKE ?")
             params.append(f"%{criteria['title']}%")
 
         if "author" in criteria and criteria["author"]:
-            sql += " AND b.author LIKE ?"
+            sql_parts.append("AND b.author LIKE ?")
             params.append(f"%{criteria['author']}%")
 
         if "publisher" in criteria and criteria["publisher"]:
-            sql += " AND b.publisher LIKE ?"
+            sql_parts.append("AND b.publisher LIKE ?")
             params.append(f"%{criteria['publisher']}%")
 
         if "status" in criteria and criteria["status"]:
-            sql += " AND rp.status = ?"
+            sql_parts.append("AND rp.status = ?")
             params.append(criteria["status"])
 
         if "series_id" in criteria and criteria["series_id"]:
-            sql += " AND b.series_id = ?"
+            sql_parts.append("AND b.series_id = ?")
             params.append(criteria["series_id"])
 
         if "category_id" in criteria and criteria["category_id"]:
-            sql += " AND (b.category_id = ? OR s.category_id = ?)"
+            sql_parts.append("AND (b.category_id = ? OR s.category_id = ?)")
             params.append(criteria["category_id"])
             params.append(criteria["category_id"])
 
         if "custom_metadata" in criteria and criteria["custom_metadata"]:
             for key, value in criteria["custom_metadata"].items():
-                sql += """
+                sql_parts.append("""
                     AND EXISTS (
                         SELECT 1 FROM custom_metadata cm 
                         WHERE cm.book_id = b.id 
                         AND cm.key = ? AND cm.value LIKE ?
                     )
-                """
+                """)
                 params.append(key)
                 params.append(f"%{value}%")
 
@@ -196,15 +202,13 @@ class SearchController:
         if sort_order not in valid_sort_orders:
             sort_order = "ASC"
 
-        sql += f" ORDER BY b.{sort_field} COLLATE NOCASE {sort_order}"
+        sql_parts.append(f" ORDER BY b.{sort_field} COLLATE NOCASE {sort_order}")
 
         # クエリを実行
-        conn = self.db_manager.connect()
-        cursor = conn.cursor()
-        cursor.execute(sql, params)
+        sql = " ".join(sql_parts)
+        book_data_list = self.db_manager.connect().execute(sql, params).fetchall()
+        book_data_list = [dict(row) for row in book_data_list]
 
-        # 結果を取得
-        book_data_list = [dict(row) for row in cursor.fetchall()]
         return [Book(book_data, self.db_manager) for book_data in book_data_list]
 
     def search_in_content(self, query, book_ids=None):
@@ -228,11 +232,13 @@ class SearchController:
             return {}
 
         # 検索対象の書籍を取得
+        from controllers.book_controller import BookController
+
+        book_controller = BookController(self.db_manager)
+
         if book_ids:
-            books = [self.db_manager.get_book(book_id) for book_id in book_ids]
-            books = [
-                Book(book_data, self.db_manager) for book_data in books if book_data
-            ]
+            books = [book_controller.get_book(book_id) for book_id in book_ids]
+            books = [book for book in books if book]
         else:
             books = self.search_books("")
 
@@ -247,7 +253,7 @@ class SearchController:
                 doc = book.open()
                 book_results = []
 
-                for page_idx in range(len(doc)):
+                for _, page_idx in enumerate(doc):
                     page = doc[page_idx]
                     text = page.get_text()
 

@@ -1,3 +1,6 @@
+from repositories.category_repository import CategoryRepository
+
+
 class CategoryController:
     """
     カテゴリに関連する操作を管理するコントローラクラス。
@@ -18,6 +21,7 @@ class CategoryController:
             データベース接続マネージャ
         """
         self.db_manager = db_manager
+        self.repository = CategoryRepository(db_manager)
 
     def get_all_categories(self):
         """
@@ -28,7 +32,7 @@ class CategoryController:
         list
             カテゴリ情報の辞書のリスト
         """
-        return self.db_manager.get_all_categories()
+        return self.repository.get_all()
 
     def get_category(self, category_id):
         """
@@ -44,7 +48,7 @@ class CategoryController:
         dict または None
             カテゴリ情報の辞書、もしくは見つからない場合はNone
         """
-        return self.db_manager.get_category(category_id)
+        return self.repository.get_by_id(category_id)
 
     def create_category(self, name, description=None):
         """
@@ -62,24 +66,7 @@ class CategoryController:
         int または None
             追加されたカテゴリのID、もしくは失敗した場合はNone
         """
-        conn = self.db_manager.connect()
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute(
-                """
-                INSERT INTO categories (name, description)
-                VALUES (?, ?)
-                """,
-                (name, description),
-            )
-
-            conn.commit()
-            return cursor.lastrowid
-        except Exception as e:
-            print(f"Error creating category: {e}")
-            conn.rollback()
-            return None
+        return self.repository.create(name, description)
 
     def update_category(self, category_id, name, description=None):
         """
@@ -99,25 +86,7 @@ class CategoryController:
         bool
             更新が成功したかどうか
         """
-        conn = self.db_manager.connect()
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute(
-                """
-                UPDATE categories
-                SET name = ?, description = ?
-                WHERE id = ?
-                """,
-                (name, description, category_id),
-            )
-
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"Error updating category: {e}")
-            conn.rollback()
-            return False
+        return self.repository.update(category_id, name, description)
 
     def delete_category(self, category_id):
         """
@@ -133,45 +102,7 @@ class CategoryController:
         bool
             削除が成功したかどうか
         """
-        conn = self.db_manager.connect()
-        cursor = conn.cursor()
-
-        try:
-            # カテゴリに所属するシリーズのカテゴリIDをNULLに設定
-            cursor.execute(
-                """
-                UPDATE series
-                SET category_id = NULL
-                WHERE category_id = ?
-                """,
-                (category_id,),
-            )
-
-            # カテゴリに所属する書籍のカテゴリIDをNULLに設定
-            cursor.execute(
-                """
-                UPDATE books
-                SET category_id = NULL
-                WHERE category_id = ?
-                """,
-                (category_id,),
-            )
-
-            # カテゴリを削除
-            cursor.execute(
-                """
-                DELETE FROM categories
-                WHERE id = ?
-                """,
-                (category_id,),
-            )
-
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"Error deleting category: {e}")
-            conn.rollback()
-            return False
+        return self.repository.delete(category_id)
 
     def get_categories_with_counts(self):
         """
@@ -182,23 +113,4 @@ class CategoryController:
         list
             拡張したカテゴリ情報の辞書のリスト
         """
-        conn = self.db_manager.connect()
-        cursor = conn.cursor()
-
-        # カテゴリごとの書籍数を取得
-        cursor.execute("""
-            SELECT c.id, c.name, c.description,
-                   COUNT(DISTINCT b.id) as book_count,
-                   COUNT(DISTINCT s.id) as series_count
-            FROM categories c
-            LEFT JOIN books b ON b.category_id = c.id
-            LEFT JOIN series s ON s.category_id = c.id
-            GROUP BY c.id
-            ORDER BY c.name
-        """)
-
-        categories = []
-        for row in cursor.fetchall():
-            categories.append(dict(row))
-
-        return categories
+        return self.repository.get_with_counts()

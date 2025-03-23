@@ -1,4 +1,5 @@
 from models.series import Series
+from repositories.series_repository import SeriesRepository
 
 
 class SeriesController:
@@ -21,6 +22,7 @@ class SeriesController:
             データベース接続マネージャ
         """
         self.db_manager = db_manager
+        self.repository = SeriesRepository(db_manager)
 
     def get_all_series(self, category_id=None):
         """
@@ -36,7 +38,7 @@ class SeriesController:
         list
             Series オブジェクトのリスト
         """
-        series_data_list = self.db_manager.get_all_series(category_id)
+        series_data_list = self.repository.get_all(category_id)
         return [
             Series(series_data, self.db_manager) for series_data in series_data_list
         ]
@@ -55,7 +57,7 @@ class SeriesController:
         Series または None
             指定IDのシリーズ、もしくは見つからない場合はNone
         """
-        series_data = self.db_manager.get_series(series_id)
+        series_data = self.repository.get_by_id(series_id)
         if series_data:
             return Series(series_data, self.db_manager)
         return None
@@ -78,11 +80,10 @@ class SeriesController:
         int または None
             追加されたシリーズのID、もしくは失敗した場合はNone
         """
+        data = {"name": name, "description": description, "category_id": category_id}
+
         try:
-            series_id = self.db_manager.add_series(
-                name=name, description=description, category_id=category_id
-            )
-            return series_id
+            return self.repository.create(data)
         except Exception as e:
             print(f"Error creating series: {e}")
             return None
@@ -124,7 +125,7 @@ class SeriesController:
             return True  # 更新するデータがない場合は成功とみなす
 
         # 更新を実行
-        return series.update_metadata(**update_data)
+        return self.repository.update(series_id, update_data)
 
     def delete_series(self, series_id):
         """
@@ -145,28 +146,15 @@ class SeriesController:
             return False
 
         # シリーズ内の全書籍のシリーズIDをNULLに設定
+        from repositories.book_repository import BookRepository
+
+        book_repo = BookRepository(self.db_manager)
+
         for book in series.books:
-            book.update_metadata(series_id=None, series_order=None)
+            book_repo.update(book.id, {"series_id": None, "series_order": None})
 
         # シリーズを削除
-        conn = self.db_manager.connect()
-        cursor = conn.cursor()
-
-        try:
-            # カスタムメタデータを削除
-            cursor.execute(
-                "DELETE FROM custom_metadata WHERE series_id = ?", (series_id,)
-            )
-
-            # シリーズを削除
-            cursor.execute("DELETE FROM series WHERE id = ?", (series_id,))
-
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"Error deleting series: {e}")
-            conn.rollback()
-            return False
+        return self.repository.delete(series_id)
 
     def add_book_to_series(self, book_id, series_id, order=None):
         """
@@ -190,7 +178,13 @@ class SeriesController:
         if not series:
             return False
 
-        return series.add_book(book_id, order)
+        from repositories.book_repository import BookRepository
+
+        book_repo = BookRepository(self.db_manager)
+
+        return book_repo.update(
+            book_id, {"series_id": series_id, "series_order": order}
+        )
 
     def remove_book_from_series(self, book_id, series_id):
         """
@@ -212,7 +206,11 @@ class SeriesController:
         if not series:
             return False
 
-        return series.remove_book(book_id)
+        from repositories.book_repository import BookRepository
+
+        book_repo = BookRepository(self.db_manager)
+
+        return book_repo.update(book_id, {"series_id": None, "series_order": None})
 
     def reorder_books(self, series_id, order_mapping):
         """
@@ -234,4 +232,4 @@ class SeriesController:
         if not series:
             return False
 
-        return series.reorder_books(order_mapping)
+        return self.repository.reorder_books(order_mapping)

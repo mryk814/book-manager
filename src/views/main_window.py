@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
 
         # ウィンドウの基本設定
         self.setWindowTitle("PDF Library Manager")
-        self.setMinimumSize(1280, 720)
+        self.setMinimumSize(400, 400)
         self.resize(
             1600, 900
         )  # フルHDの80%程度の初期サイズ（一般的に使いやすいサイズ）
